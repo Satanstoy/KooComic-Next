@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "koocomic-ci-${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Lua 5.1 tests and package validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes lua5.1
+
+      - name: Check for sensitive runtime files
+        shell: bash
+        run: |
+          if find koocomic.koplugin -type f \( -name '*.log' -o -name '*.part' -o -name '*.epub' -o -name 'koobone.lua' -o -name 'koocomic.lua' \) | grep -q .; then
+            echo "Runtime or sensitive files found inside plugin package" >&2
+            exit 1
+          fi
+
+      - name: Check Lua 5.1 syntax
+        shell: bash
+        run: find koocomic.koplugin spec -type f -name '*.lua' -print0 | xargs -0 -n1 luac5.1 -p
+
+      - name: Run regression specs
+        shell: bash
+        run: |
+          for spec_file in spec/*_spec.lua; do
+            echo "Running ${spec_file}"
+            lua5.1 "${spec_file}"
+          done
+
+      - name: Build a test release package
+        shell: bash
+        run: |
+          version="$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' koocomic.koplugin/_meta.lua)"
+          ./scripts/package_release.sh "${version}" "${GITHUB_REPOSITORY}" dist-ci
+
+      - name: Verify the package, checksum, and manifest
+        shell: bash
+        run: |
+          unzip -tq dist-ci/release/koocomic.koplugin-*.zip
+          cd dist-ci/release
+          shasum -a 256 -c koocomic.koplugin-*.zip.sha256
+          python3 -m json.tool update.json >/dev/null

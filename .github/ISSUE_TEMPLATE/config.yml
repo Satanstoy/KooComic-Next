@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安装与使用说明 / Installation guide
+    url: https://github.com/jackchensky/KooComic#安装
+    about: 提交问题前，请先查看 Storefront、手动安装和升级说明。
+  - name: 安全问题 / Security report
+    url: https://github.com/jackchensky/KooComic/blob/main/SECURITY.md
+    about: 涉及账号、会话、更新校验或其他安全问题时，请先阅读私密报告方式。

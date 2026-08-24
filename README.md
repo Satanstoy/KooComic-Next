@@ -1,9 +1,10 @@
 <p align="center">
-  <img src="assets/koocomic-social-preview.png" alt="KooComic / koo漫画 — KOReader 漫画书架" width="100%">
+  <img src="assets/koocomic-social-preview.jpg" alt="KooComic / koo漫画 — KOReader 漫画书架" width="100%">
 </p>
 
 # koo漫画（KooComic）
 
+[![CI](https://github.com/jackchensky/KooComic/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jackchensky/KooComic/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/jackchensky/KooComic?label=release)](https://github.com/jackchensky/KooComic/releases/latest)
 [![GitHub stars](https://img.shields.io/github/stars/jackchensky/KooComic?style=flat&label=stars)](https://github.com/jackchensky/KooComic/stargazers)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg)](LICENSE)
@@ -57,6 +58,8 @@
 - 提交截图前，请遮盖账号、邮箱和其他个人信息。
 
 KOOBONE 没有提供面向本插件的公开 API，其网页端接口变化可能导致部分功能暂时失效。如果遇到问题，请在 [Issues](https://github.com/jackchensky/KooComic/issues) 中说明 Kindle 型号、KOReader 版本、插件版本和已脱敏的错误信息。
+
+参与开发前请阅读 [`CONTRIBUTING.md`](CONTRIBUTING.md)。涉及账号、会话、更新校验或其他安全问题时，请不要公开细节，改按 [`SECURITY.md`](SECURITY.md) 私密报告。
 
 ## English
 
