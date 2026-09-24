@@ -32,6 +32,10 @@ function Downloader:_finishChanged()
     if self.on_changed then pcall(self.on_changed) end
 end
 
+function Downloader:notifyChanged()
+    self:_finishChanged()
+end
+
 function Downloader:download(item)
     if self.active then
         UIManager:show(InfoMessage:new{ text = "已有一个下载任务正在进行。" })

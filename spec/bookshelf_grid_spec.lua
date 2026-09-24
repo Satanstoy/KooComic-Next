@@ -27,6 +27,7 @@ local widget_modules = {
     "ui/widget/container/framecontainer",
     "ui/widget/horizontalgroup",
     "ui/widget/horizontalspan",
+    "ui/widget/iconwidget",
     "ui/widget/imagewidget",
     "ui/widget/overlapgroup",
     "ui/widget/textboxwidget",
@@ -107,11 +108,13 @@ local storage = {
     partSize = function() return 0 end,
 }
 local page_events = {}
+local refresh_count = 0
 local Grid = require("koobone.ui.bookshelf_grid")
 local view = Grid.show{
     books = books,
     storage = storage,
     account = { nick = "Tester" },
+    on_refresh = function() refresh_count = refresh_count + 1 end,
     on_page_changed = function(items, page, pages)
         page_events[#page_events + 1] = { count = #items, page = page, pages = pages }
     end,
@@ -141,5 +144,17 @@ view:update{ books = { books[1], books[2] } }
 assert(view.page == 1)
 assert(view.pages == 1)
 assert(#view:visibleItems() == 2)
+
+-- The header uses symmetric actions: refresh at left and an explicit close
+-- button at right. The old back arrow and redundant overflow menu are gone.
+local header = view[1][2][1]
+assert(#header == 3)
+local close_icon = header[3][1][1][1]
+assert(close_icon.icon == "close")
+header[1].callback()
+assert(refresh_count == 1)
+assert(view.closed == false)
+header[3].callback()
+assert(view.closed == true)
 
 print("bookshelf grid spec: OK")

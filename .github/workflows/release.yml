@@ -48,7 +48,7 @@ jobs:
             dist/release/koocomic.koplugin-v${{ steps.version.outputs.value }}.zip.sha256 \
             dist/release/update.json \
             --verify-tag \
-            --generate-notes \
+            --notes-file dist/release/release-notes.md \
             --title "koo漫画 v${{ steps.version.outputs.value }}"
 
       - name: Upload fixed update manifest for GitHub Pages

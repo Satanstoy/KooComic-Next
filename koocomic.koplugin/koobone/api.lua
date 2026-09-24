@@ -10,6 +10,12 @@ Api.__index = Api
 Api.BASE = "https://bookof.hk"
 Api.WEB_VERSION = "7"
 Api.CLIENT_VERSION = "KOOBONE/5.0.0"
+-- bookof.hk currently returns only {"msgid":"e499"} when its login
+-- endpoint receives a non-browser User-Agent. Keep the official X-KB-FROM
+-- header for source/version information while using a browser-compatible UA
+-- for site requests, matching the web client this adapter implements.
+Api.USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " ..
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 
 function Api:new(settings)
     return setmetatable({ settings = assert(settings, "settings required") }, self)
@@ -18,7 +24,7 @@ end
 function Api:headers(extra, include_session)
     local headers = {
         ["Accept"] = "*/*",
-        ["User-Agent"] = "kooComic-KOReader/0.4.0",
+        ["User-Agent"] = self.USER_AGENT,
         ["X-KB-FROM"] = self.CLIENT_VERSION .. " WEB(" .. self.WEB_VERSION .. ") GET /web.htm",
         ["Referer"] = self.BASE .. "/web.htm",
     }
@@ -139,6 +145,11 @@ local function multipart(fields)
     return table.concat(parts), boundary
 end
 
+local function hasValidUin(value)
+    local numeric = tonumber(value)
+    return numeric ~= nil and numeric > 0
+end
+
 function Api:login(email, password)
     local account = self.settings:account()
     if not account.vlibsid then
@@ -164,14 +175,62 @@ function Api:login(email, password)
     }
     body = nil
     if not response then return nil, err end
+
+    -- The web login endpoint uses HTTP 200 for both successful and failed
+    -- authentication. Its current browser client checks the JSON `uin` field
+    -- for success and shows `msg` on failure, so an HTTP status alone cannot
+    -- be treated as a successful login.
+    local decoded_ok, login_info = pcall(JSON.decode, response.body or "")
+    if not decoded_ok or type(login_info) ~= "table" then login_info = nil end
+
     local set_cookie = Util.header(response.headers, "set-cookie")
     local key = Util.cookieValue(set_cookie, "KBSKEY")
-    if not key then return nil, "登录成功响应中没有 KBSKEY" end
     local refreshed_sid = Util.cookieValue(set_cookie, "VLIBSID")
+    local has_uin = login_info and hasValidUin(login_info.uin) or false
+    local response_code = login_info and tonumber(login_info.ret) or nil
+    local message_id = login_info and Util.cleanMessage(login_info.msgid, 32) or ""
+
+    -- Lua considers numeric zero truthy. KOOBONE uses `uin: 0` (together
+    -- with `ret: -1`) for rejected credentials, so never test this field by
+    -- truthiness alone as the site's JavaScript does.
+    if login_info and (response_code and response_code < 0 or
+            login_info.uin ~= nil and not has_uin) then
+        local message = Util.cleanMessage(
+            login_info.msg or login_info.message or login_info.error, 180)
+        return nil, message ~= "" and message or "登录失败，请检查邮箱和密码"
+    end
+
+    if login_info and not has_uin then
+        local message = Util.cleanMessage(
+            login_info.msg or login_info.message or login_info.error, 180)
+        if message ~= "" then return nil, message end
+        if message_id == "e499" then
+            return nil, "服务器拒绝了当前客户端请求（e499）"
+        elseif message_id ~= "" then
+            return nil, "登录失败（服务器代码：" .. message_id .. "）"
+        end
+    end
+
+    -- The current endpoint can return the authenticated session key in the
+    -- JSON `skey` field instead of a KBSKEY Set-Cookie header. Treat it as the
+    -- same session secret only after a positive UIN has confirmed success.
+    if not key and has_uin then
+        local response_key = Util.trim(login_info.skey)
+        if response_key ~= "" then key = response_key end
+    end
+
+    -- Newer sessions may authenticate the existing VLIBSID without issuing a
+    -- KBSKEY. Keep accepting KBSKEY for the legacy flow, but let Auth:login()
+    -- verify either form immediately through /uinfo.php before it is trusted.
+    if not has_uin and not key then
+        return nil, login_info and "登录失败，请检查邮箱和密码" or
+            "服务器返回了无法识别的登录响应"
+    end
+
     if refreshed_sid then account.vlibsid = refreshed_sid end
-    account.kbskey = key
+    if key then account.kbskey = key end
     self.settings:flush()
-    return true
+    return true, login_info
 end
 
 function Api:userInfo()
@@ -232,7 +291,7 @@ function Api:download(url, part_path, options)
         redirect = true,
         headers = options.headers or {
             ["Accept"] = "*/*",
-            ["User-Agent"] = "kooComic-KOReader/0.4.0",
+            ["User-Agent"] = self.USER_AGENT,
             ["X-KB-FROM"] = self.CLIENT_VERSION .. " WEB(" .. self.WEB_VERSION .. ") FETCH /web.htm",
             ["Referer"] = self.BASE .. "/",
         },

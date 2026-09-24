@@ -20,7 +20,10 @@ local function defaults()
             records = {},
         },
         update = {
-            auto_check_enabled = false,
+            -- New installations check once per day by default. This only
+            -- checks the manifest and shows a prompt; installation still
+            -- requires explicit user confirmation.
+            auto_check_enabled = true,
             last_auto_update_check_at = 0,
             last_update_prompt_date = "",
             update_prompt_later_count = 0,

@@ -46,4 +46,18 @@ assert(settings.data.schema_version == 3)
 assert(files["/settings/koobone.lua"].data.account.nick == "Reader")
 assert(files["/settings/koocomic.lua"].data.account.nick == "Reader")
 
+-- New installations opt in to the lightweight daily version check, while an
+-- existing user's explicit choice to turn it off must remain untouched.
+local fresh = Settings:new("/settings/fresh.lua")
+assert(fresh:update().auto_check_enabled == true)
+
+files["/settings/existing.lua"] = {
+    data = {
+        schema_version = 3,
+        update = { auto_check_enabled = false },
+    },
+}
+local existing = Settings:new("/settings/existing.lua")
+assert(existing:update().auto_check_enabled == false)
+
 print("settings migration spec: OK")

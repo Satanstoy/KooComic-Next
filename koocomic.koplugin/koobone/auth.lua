@@ -12,7 +12,10 @@ end
 
 function Auth:hasSession()
     local account = self.settings:account()
-    return account.vlibsid ~= nil and account.kbskey ~= nil and account.uin ~= nil
+    -- KBSKEY was required by the legacy web flow, but current sessions may be
+    -- authenticated by VLIBSID alone. validateSession() always confirms the
+    -- stored session with /uinfo.php before it is used.
+    return account.vlibsid ~= nil and account.uin ~= nil
 end
 
 function Auth:validateSession()

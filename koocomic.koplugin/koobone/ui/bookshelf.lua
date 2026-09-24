@@ -146,7 +146,6 @@ function Bookshelf:_gridOptions(books)
         on_search = function() self:showSearch() end,
         on_sort = function() self:showSort() end,
         on_filter = function() self:showFilter() end,
-        on_more = function() self:showMore() end,
         on_downloads = self.on_downloads,
         on_account = self.on_account,
         on_settings = self.on_settings,

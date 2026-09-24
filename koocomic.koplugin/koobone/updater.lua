@@ -148,7 +148,7 @@ function Updater:check()
         redirect = true,
         headers = {
             ["Accept"] = "application/json",
-            ["User-Agent"] = "kooComic-KOReader-Updater/0.4.0",
+            ["User-Agent"] = "kooComic-KOReader-Updater/0.4.1",
         },
         block_timeout = 15,
         total_timeout = 30,
@@ -275,7 +275,7 @@ function Updater:install(release, on_progress)
         max_bytes = self.MAX_PACKAGE_BYTES,
         headers = {
             ["Accept"] = "application/zip, application/octet-stream",
-            ["User-Agent"] = "kooComic-KOReader-Updater/0.4.0",
+            ["User-Agent"] = "kooComic-KOReader-Updater/0.4.1",
         },
         on_progress = function(current, total)
             local ratio = total > 0 and math.min(1, current / total) or 0

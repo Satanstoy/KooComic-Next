@@ -7,6 +7,7 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local IconWidget = require("ui/widget/iconwidget")
 local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
@@ -375,9 +376,9 @@ function GridShelf:_close()
 end
 
 function GridShelf:_buildHeader(layers, margin, width, y, height)
-    local back_w = math.floor(width * 0.13)
-    local right_w = math.floor(width * 0.23)
-    local title_w = width - back_w - right_w
+    local action_w = math.floor(width * 0.14)
+    local title_w = width - action_w * 2
+    local refresh_icon_size = 22
     local account = self.options.account or {}
     local subtitle = tostring(account.nick or "KOOBONE 用户") .. " · " ..
         tostring(#self.options.books) .. " 本"
@@ -386,16 +387,15 @@ function GridShelf:_buildHeader(layers, margin, width, y, height)
         textBox("koo漫画", title_w, math.floor(height * 0.56), 20, { bold = true }),
         textBox(subtitle, title_w, math.floor(height * 0.36), 12, { fgcolor = DARK_GRAY }),
     }
-    local refresh_w = math.floor(right_w * 0.55)
     local header = HorizontalGroup:new{
         align = "center",
-        tappable(back_w, height, singleLine("‹", back_w, height, 26, { bold = true }),
-            function() self:_close() end),
+        tappable(action_w, height,
+            singleLine("↻", action_w, height, refresh_icon_size, { bold = true }), self.options.on_refresh),
         CenterContainer:new{ dimen = Geom:new{ w = title_w, h = height }, title },
-        tappable(refresh_w, height, singleLine("↻", refresh_w, height, 21, { bold = true }),
-            self.options.on_refresh),
-        tappable(right_w - refresh_w, height,
-            singleLine("⋮", right_w - refresh_w, height, 22, { bold = true }), self.options.on_more),
+        tappable(action_w, height,
+            -- Reuse KOReader's native TitleBar close asset and its default
+            -- DGENERIC_ICON_SIZE, matching Menu (including Download Manager).
+            IconWidget:new{ icon = "close" }, function() self:_close() end),
     }
     self:_add(layers, margin, y, header)
 end
