@@ -45,7 +45,8 @@ assert(current.books[1]._series.title=="A", "actual title-sort command must upda
 local ui={series_style="collage"}
 shelf.settings.ui=function() return ui end
 local fetched={}
-shelf.cover_cache={url=function() return "fixture" end,fetch=function(_,item) fetched[#fetched+1]=item;return "cached" end}
+shelf.cover_cache={url=function() return "fixture" end,fetch=function() error("HTTP on UI thread") end,
+    fetchAsync=function(_,item,done) fetched[#fetched+1]=item;done("cached");return {cancel=function() return true end} end}
 shelf.grid_view.refreshCovers=function() end
 local members={}
 for index=1,9 do members[index]={file_md5=tostring(index)} end

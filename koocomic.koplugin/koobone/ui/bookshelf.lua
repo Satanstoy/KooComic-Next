@@ -112,6 +112,7 @@ end
 function Bookshelf:_prefetchCovers(items)
     if not self.cover_cache or type(items) ~= "table" then return end
     self.cover_generation = self.cover_generation + 1
+    if self.cover_handle then self.cover_handle:cancel();self.cover_handle=nil end
     local generation = self.cover_generation
     local pending = {}
     local candidates,seen={},{}
@@ -133,15 +134,20 @@ function Bookshelf:_prefetchCovers(items)
     local index = 0
     local function fetchNext()
         if generation ~= self.cover_generation or not self.grid_view or self.grid_view.closed then return end
-        index = index + 1
-        local item = pending[index]
+        local item = pending[index+1]
         if not item then return end
-        local ok, path = pcall(self.cover_cache.fetch, self.cover_cache, item)
-        if ok and path then
-            item._koobone_cover_path = path
-            self.grid_view:refreshCovers()
+        local called,handle,err=pcall(self.cover_cache.fetchAsync,self.cover_cache,item,function(path)
+            if generation~=self.cover_generation or not self.grid_view or self.grid_view.closed then return end
+            self.cover_handle=nil
+            if path then item._koobone_cover_path=path;self.grid_view:refreshCovers() end
+            UIManager:scheduleIn(0.05,fetchNext)
+        end)
+        if called and handle then
+            index=index+1;self.cover_handle=handle
+        elseif called and err=="cover worker busy" then UIManager:scheduleIn(0.05,fetchNext)
+        else
+            index=index+1;UIManager:scheduleIn(0.05,fetchNext)
         end
-        UIManager:scheduleIn(0.05, fetchNext)
     end
     if #pending > 0 then UIManager:scheduleIn(0.05, fetchNext) end
 end
@@ -303,6 +309,7 @@ function Bookshelf:show(books)
             self.grid_view = nil
             self.menu = nil
             self.cover_generation = self.cover_generation + 1
+            if self.cover_handle then self.cover_handle:cancel();self.cover_handle=nil end
         end
     end
     local ok, result = pcall(BookshelfGrid.show, options)

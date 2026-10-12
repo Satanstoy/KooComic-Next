@@ -39,3 +39,17 @@ assert(cache:path{file_md5="stable-id"}==first,"offline identity must resolve ca
 assert(cache:localPath{ file_md5 = "missing", cover_url = "/covers/a.jpg" } == nil)
 
 print("cover cache spec: OK")
+local work,done
+local async_cache=CoverCache:new({BASE="https://bookof.hk"},{runner={start=function(_,task,complete)
+    work,done=task,complete;return {cancel=function() return true end}
+end}})
+local fetched=false
+async_cache.fetch=function() fetched=true;return "/cache/cover.jpg" end
+async_cache.localPath=function() return fetched and "/cache/cover.jpg" end
+assert(type(async_cache.fetchAsync)=="function","cover HTTP must run outside the UI thread")
+local delivered
+local handle=assert(async_cache:fetchAsync({file_md5="async"},function(path) delivered=path end))
+assert(not fetched and not delivered)
+assert(not async_cache:fetchAsync({file_md5="other"},function() end),"cover prefetch must bound itself to one child")
+done(work());assert(delivered=="/cache/cover.jpg" and async_cache.active==nil)
+assert(handle.cancel())

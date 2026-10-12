@@ -59,13 +59,15 @@ local function looksLikeImage(path)
     return head:sub(1, 4) == "RIFF" and head:sub(9, 12) == "WEBP"
 end
 
-function CoverCache:new(api)
+function CoverCache:new(api,options)
+    options=options or {}
     local base = ffiUtil.joinPath(DataStorage:getDataDir(), "cache")
     local directory = ffiUtil.joinPath(base, "koobone-covers")
     ensureDirectory(directory)
     return setmetatable({
         api = assert(api, "api required"),
         directory = directory,
+        runner = options.runner,
     }, self)
 end
 
@@ -136,6 +138,26 @@ function CoverCache:fetch(item)
         return nil, Util.cleanMessage(move_err or "无法保存封面")
     end
     return path
+end
+
+function CoverCache:fetchAsync(item,complete)
+    if self.active then return nil,"cover worker busy" end
+    local cached=self:localPath(item)
+    if cached then complete(cached);return {cancel=function() return false end} end
+    self.runner=self.runner or require("koobone.async_task"):new{max_bytes=4096,timeout=120}
+    local flight={}
+    self.active=flight
+    local handle,err=self.runner:start(function()
+        local path=self:fetch(item)
+        return path and {path=path} or nil,"封面获取失败"
+    end,function(result)
+        if self.active~=flight then return end
+        self.active=nil
+        local path=type(result)=="table" and result.path
+        complete(path and self:localPath(item)==path and path or nil)
+    end)
+    if not handle then self.active=nil;return nil,err end
+    return handle
 end
 
 return CoverCache

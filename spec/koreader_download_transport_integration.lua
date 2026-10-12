@@ -171,6 +171,22 @@ local function tests()
     assert(batch_result and batch_result.completed==20 and batch_result.skipped==3 and batch_result.failed==0,
         "production service must emit one accurate restarted mixed-batch summary")
     for _,item in ipairs(source_items) do assert(files:hash(storage:itemPath(item))==files:hash(source)) end
+    local BB=require("ffi/blitbuffer")
+    local cover=BB.new(8,8,BB.TYPE_BBRGB32);cover:fill(BB.COLOR_WHITE)
+    assert(cover:writeToFile(directory.."/cover.png","png"));cover:free()
+    local CoverCache=require("koobone.cover_cache")
+    local cache=CoverCache:new({BASE="https://fixture.invalid",download=function(_,_,path,settings)
+        assert(tonumber(ffi.C.getpid())~=parent,"cover HTTP must execute in a child")
+        return transport.api:download(base.."/cover.png",path,settings)
+    end},{runner=require("koobone.async_task"):new{max_bytes=4096,
+        schedule=function(_,callback) scheduled[#scheduled+1]=callback end}})
+    cache.directory=directory.."/covers";assert(files:mkdir(cache.directory))
+    finished=false
+    assert(cache:fetchAsync({file_md5="cover-fixture",cover_url="https://fixture.invalid/cover.png"},function(path)
+        result=path;finished=true
+    end))
+    assert(not finished,"cover prefetch must not block the UI")
+    pump();assert(result and files:hash(result)==files:hash(directory.."/cover.png"))
 end
 local ok,err=pcall(tests)
 Util.terminateSubProcess(server)
