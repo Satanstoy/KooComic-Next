@@ -107,3 +107,29 @@ assert(queue:tick())
 callbacks[#callbacks].done(true,{validated=true,committed=true,bytes=100,output_fingerprint=string.rep("c",64),warning="metadata_warning"})
 assert(queue.jobs[1].warning=="metadata_warning" and queue:snapshot().jobs[1].warning=="metadata_warning")
 print("download queue spec: OK")
+local batch_saves=0
+local batch_queue=Queue:new{account_id="test-account",coordinator=Coordinator:new(),worker=worker,
+    checkpoint=function() batch_saves=batch_saves+1;return true end}
+assert(batch_queue:add({item("batch")},{batch_stats={downloaded=2,duplicate=1,invalid=0}}))
+assert(batch_saves==1 and batch_queue.batch and batch_queue.batch.ids[batch_queue.jobs[1].id],
+    "batch metadata and jobs must be committed in the same snapshot")
+assert(batch_queue:snapshot().batch.stats.downloaded==2)
+local bad_batch=batch_queue:snapshot();bad_batch.batch.ids.foreign=true
+assert(not recovering:restore(bad_batch),"batch references to unknown jobs must reject the entire snapshot")
+bad_batch=batch_queue:snapshot();bad_batch.batch.stats.downloaded=math.huge
+assert(not recovering:restore(bad_batch),"invalid persisted batch counters must be rejected")
+batch_queue.jobs[1].state="completed";batch_queue.jobs[1].bytes=10;batch_queue.jobs[1].total=10
+batch_queue.jobs[1].attempts=1;batch_queue.jobs[1].output_fingerprint=string.rep("a",64)
+local old_job=batch_queue.jobs[1]
+batch_queue.checkpoint=function() return false end
+assert(not batch_queue:add({item("batch"),item("another")},{reopen_completed=true,batch_stats={downloaded=3,duplicate=0,invalid=0}}))
+assert(#batch_queue.jobs==1 and batch_queue.jobs[1]==old_job and old_job.state=="completed" and
+    batch_queue.batch.stats.downloaded==2,"failed enqueue must roll back reopened jobs and batch metadata together")
+batch_queue.checkpoint=function() return true end
+old_job.state="failed";old_job.attempts=3
+assert(batch_queue:retry(old_job.id) and old_job.retry_base==3,"manual retry must start a fresh bounded retry cycle")
+old_job.state="failed";old_job.attempts=4
+assert(batch_queue:retry(old_job.id,false,true) and old_job.retry_base==3,"automatic retry must not reset its own budget")
+old_job.state="failed";batch_queue.batch=nil
+assert(batch_queue:retry(old_job.id,false,false,true) and batch_queue.batch.ids[old_job.id],
+    "explicit history retry must create a durable result batch")

@@ -23,6 +23,13 @@ service.options.space=function() return 1024*1024*128 end
 local counts=assert(service:enqueue(items,"one"));assert(counts.added==2)
 local summary=service:summary(service.batch)
 assert(summary.downloaded==1 and summary.skipped==1,"batch summaries must retain already-downloaded and other skipped classifications")
+local restarted=Service:new{settings=settings,storage=service.storage,api={},library={},directory="/private",
+    space=service.options.space,schedule=service.schedule,worker_factory=service.options.worker_factory,
+    store_factory=service.options.store_factory}
+assert(restarted:ensure())
+local restored_summary=restarted:summary(restarted.batch)
+assert(restarted.batch and restored_summary.pending==2 and restored_summary.downloaded==1,
+    "restart must retain batch membership and skipped counts, without counting unrelated history")
 assert(service:resume())
 table.remove(tasks,1)()
 assert(service:isActive() and #callbacks==1)

@@ -144,9 +144,36 @@ local function tests()
     assert(queue.jobs[22].state=="completed" and files:hash(directory.."/downloads/Source race.epub")==files:hash(source),
         "changing the public partial at commit time must not publish unvalidated bytes")
     files.renameNoReplace=rename
+    local Service=require("koobone.download_service")
+    local source_items={}
+    for index=1,20 do source_items[index]={file_md5="service-"..index,vol_name="Service "..index,
+        file_size=job.entry.remote_size,file_url=base.."/source.epub"} end
+    local options={settings={account=function() return {uin=account} end},storage=storage,api=transport.api,
+        library={account_id=account,urls_at=os.time(),items=source_items},directory=directory.."/production",
+        space=function() return 128*1024*1024 end,is_in_use=function() return false end,
+        schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
+    local service=Service:new(options)
+    local mixed={};for _,item in ipairs(source_items) do mixed[#mixed+1]=item end
+    mixed[#mixed+1]=source_items[1];mixed[#mixed+1]=batch[1];mixed[#mixed+1]={vol_name="Invalid identity"}
+    local counts=assert(service:enqueue(mixed,account))
+    assert(counts.added==20 and counts.duplicate==1 and counts.downloaded==1 and counts.invalid==1)
+    service=Service:new(options)
+    assert(service:ensure() and service.batch and service:summary(service.batch).skipped==3,
+        "real queue JSON must preserve batch scope and skips across reconstruction")
+    local batch_result
+    service.options.on_batch=function(value) batch_result=value end
+    assert(service:resume())
+    for _=1,8000 do
+        if batch_result then break end
+        local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+        ffi.C.usleep(5000)
+    end
+    assert(batch_result and batch_result.completed==20 and batch_result.skipped==3 and batch_result.failed==0,
+        "production service must emit one accurate restarted mixed-batch summary")
+    for _,item in ipairs(source_items) do assert(files:hash(storage:itemPath(item))==files:hash(source)) end
 end
 local ok,err=pcall(tests)
 Util.terminateSubProcess(server)
 for _=1,100 do if Util.isSubProcessDone(server) then break end;ffi.C.usleep(5000) end
 assert(ok,err)
-print("KOReader real HTTP download integration: OK (20 serial commits and external-file race)")
+print("KOReader real HTTP download integration: OK (20 worker + 20 restarted service commits, mixed summary, external-file race)")

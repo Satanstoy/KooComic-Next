@@ -75,7 +75,9 @@ function Service:ensure()
     end)
     if not ok then return nil,"下载队列初始化失败；已保留原记录" end
     self.queue,self.store,self.worker=queue,store,worker
-    self.batch,self.batch_stats,self.running,self.refreshing=nil,nil,false,false
+    self.batch=queue.batch and queue.batch.ids
+    self.batch_stats=queue.batch and queue.batch.stats
+    self.running,self.refreshing=false,false
     if self.files and worker.paths then self:reconcile() end
     return queue
 end
@@ -161,29 +163,11 @@ end
 function Service:enqueue(items,account)
     if account~=self:account() then return nil,"账号已变化，请重新确认" end
     local preview,err=self:preview(items);if not preview then return nil,err end
-    local before={};for _,job in ipairs(self.queue.jobs) do before[job.id]=true end
-    local reopened={}
-    for _,raw in ipairs(preview.items) do
-        local entry=Entry.normalize(account,raw)
-        for _,job in ipairs(self.queue.jobs) do
-            if job.id==entry.id and job.state=="completed" then
-                if not self.queue:retry(job.id,true) then return nil,"重下状态保存失败" end
-                reopened[job.id]=true
-            end
-        end
-    end
-    local counts,add_error=self.queue:add(preview.items)
+    local counts,add_error=self.queue:add(preview.items,{reopen_completed=true,
+        batch_stats={downloaded=preview.downloaded,duplicate=preview.duplicate,invalid=preview.invalid}})
     if not counts then return nil,add_error end
-    self.batch=self.batch or {}
-    self.batch_stats=self.batch_stats or {downloaded=0,duplicate=0,invalid=0}
-    for _,job in ipairs(self.queue.jobs) do
-        if not before[job.id] or reopened[job.id] then self.batch[job.id]=true end
-    end
-    for _ in pairs(reopened) do counts.added=counts.added+1;counts.duplicate=counts.duplicate-1 end
-    counts.downloaded=counts.downloaded+preview.downloaded
-    counts.invalid=counts.invalid+preview.invalid
-    counts.duplicate=counts.duplicate+preview.duplicate
-    for _,field in ipairs({"downloaded","duplicate","invalid"}) do self.batch_stats[field]=self.batch_stats[field]+counts[field] end
+    self.batch=self.queue.batch and self.queue.batch.ids
+    self.batch_stats=self.queue.batch and self.queue.batch.stats
     return counts
 end
 
@@ -223,7 +207,9 @@ function Service:_pump()
         end
         if not self.running or self.queue.paused then return end
         for _,job in ipairs(self.queue.jobs) do
-            if job.state=="failed" and job.error_code=="network" and job.attempts<=2 then self.queue:retry(job.id) end
+            if job.state=="failed" and job.error_code=="network" and job.attempts-(job.retry_base or 0)<=2 then
+                self.queue:retry(job.id,false,true)
+            end
         end
         if not self.options.worker_factory then
             local age=self.library.urls_at and os.time()-self.library.urls_at
@@ -246,8 +232,10 @@ function Service:_pump()
         if summary.pending==0 then
             self.running=false
             if self.batch and next(self.batch) and self.options.on_batch then pcall(self.options.on_batch,summary) end
-            self.batch=nil
-            self.batch_stats=nil
+            local previous=self.queue.batch
+            self.queue.batch=nil
+            if self.queue:_save() then self.batch,self.batch_stats=nil,nil
+            else self.queue.batch=previous end
         else self:_pump() end
         if self.options.on_changed then pcall(self.options.on_changed) end
     end
@@ -281,8 +269,11 @@ end
 
 function Service:retry(id)
     local queue,err=self:ensure();if not queue then return nil,err end
-    local ok,retry_error=queue:retry(id)
-    if ok then return self:resume() end
+    local ok,retry_error=queue:retry(id,false,false,true)
+    if ok then
+        self.batch,self.batch_stats=queue.batch.ids,queue.batch.stats
+        return self:resume()
+    end
     return nil,retry_error
 end
 
