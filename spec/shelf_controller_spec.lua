@@ -79,4 +79,16 @@ shown.buttons[2][1].callback()
 assert(shown.ok_callback and deleted==0,"series delete must preview and require explicit confirmation")
 shown.ok_callback()
 assert(deleted==2 and shown.text:find("删除 2 个阅读文件",1,true),"actual series action must execute and show a result")
+local queued
+shelf.downloader.enqueue=function(_,items) queued=items end
+current.on_view("series");current.on_hold(current.books[1])
+local download_action
+for _,row in ipairs(shown.buttons) do for _,button in ipairs(row) do
+    if button.text=="下载系列未下载卷" then download_action=button end
+end end
+assert(download_action,"series actions must expose real batch enqueue")
+download_action.callback();assert(#queued==2)
+current.on_view("volumes");current.on_hold(books[1]);current.on_select(books[2])
+assert(type(current.on_selection_download)=="function")
+current.on_selection_download();assert(#queued==2 and queued[1].file_md5=="a")
 print("shelf controller spec: OK")

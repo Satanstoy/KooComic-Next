@@ -19,11 +19,44 @@ function Downloader:new(options)
         on_changed = options.on_changed,
         preprocess = options.preprocess,
         coordinator = options.coordinator,
+        service = options.service,
+        run_when_online = options.run_when_online or function(callback) callback() end,
     }, self)
 end
 
 function Downloader:isActive()
+    if self.service then return self.service:isActive() end
     return self.active == true
+end
+
+function Downloader:enqueue(items)
+    if not self.service then return nil,"当前下载器不支持批量队列" end
+    local preview,err=self.service:preview(items)
+    if not preview then UIManager:show(InfoMessage:new{text=tostring(err)});return nil,err end
+    if preview.files==0 then
+        UIManager:show(InfoMessage:new{text=string.format("没有可入队的卷。已下载 %d，已排队 %d，无效 %d。",
+            preview.downloaded,preview.duplicate,preview.invalid)})
+        return false
+    end
+    UIManager:show(ConfirmBox:new{
+        text=string.format("将 %d 卷加入下载队列？\n已知文件共 %s，已知卷额外暂存估计 %s。\n未知大小 %d 卷，可用空间 %s。\n未知卷临时空间尚未知，按运行时剩余空间限额。\n跳过：已下载 %d，已排队 %d，无效 %d。",
+            preview.files,Util.friendlySize(preview.bytes),Util.friendlySize(preview.temporary_bytes),preview.unknown,
+            Util.friendlySize(preview.free),preview.downloaded,preview.duplicate,preview.invalid),
+        ok_text="加入队列",cancel_text="取消",ok_callback=function()
+            local counts,add_error=self.service:enqueue(items,preview.account_id)
+            if not counts then UIManager:show(InfoMessage:new{text=tostring(add_error)});return end
+            if counts.added==0 then UIManager:show(InfoMessage:new{text="这些卷已下载或已在队列中。"});return end
+            self:notifyChanged()
+            self.run_when_online(function()
+                if self.service:account()~=preview.account_id then
+                    UIManager:show(InfoMessage:new{text="账号已变化，原队列保持暂停。"});return
+                end
+                local started,start_error=self.service:resume()
+                if not started then UIManager:show(InfoMessage:new{text="已入队 "..counts.added.." 卷，暂未启动："..tostring(start_error)}) end
+            end)
+        end,
+    })
+    return true
 end
 
 function Downloader:open(path)
@@ -64,6 +97,7 @@ function Downloader:download(item)
         })
         return
     end
+    if self.service then return self:enqueue({item}) end
 
     local final_path, path_err = self.storage:resolveDownloadPath(item)
     if not final_path then

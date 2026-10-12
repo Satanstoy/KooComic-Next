@@ -932,3 +932,14 @@ v0.4.0 将插件从直接使用第三方应用名的 `KOOBONE for KOReader` 更�
 - 观察一台 v0.4.0 设备的插件内更新提醒或手动“检查更新”，确认下载、备份替换、重启和 v0.4.1 启动确认完整成功。
 - 观察 Storefront 下一次目录重建；如果用户急需通过 Storefront 更新，可让其执行“检查全部更新”直接查询 GitHub Release，或改用 koo漫画自身的“检查更新”。
 - 正式 Release 不再覆盖或重写；如发现需要立即修复的问题，应发布递增版本 v0.4.2 并生成新的清单与校验值。
+# Production Download UI Checkpoint
+
+Single-volume, series and cross-page selection now enqueue through the isolated
+download service. The native management menu supports pause/resume, confirmed
+running cancellation, waiting-only cancellation, retry and history. Account
+logout closes its widgets through the actual KOReader close event.
+
+Evidence: 37 Lua specs; official Linux KOReader native menu lifecycle test;
+20 actual local HTTP EPUB commits with target/source race assertions; selected
+toolbar rendered at 600x800. No real-account or Colorsoft acceptance is implied.
+Cross-restart batch summaries remain the next backend item.

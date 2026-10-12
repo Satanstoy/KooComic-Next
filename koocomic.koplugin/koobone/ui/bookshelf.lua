@@ -170,6 +170,7 @@ function Bookshelf:_gridOptions(books)
         end,
         on_selection_cancel=function() self.selection:cancel();self:_render() end,
         on_selection_delete=function() self:confirmDelete(self.selection:resolve(self.library.items)) end,
+        on_selection_download=function() self.downloader:enqueue(self.selection:resolve(self.library.items)) end,
         on_selection_more=function() self:showSelectionActions() end,
         path_label = nav.series and nav.series.title or (self.query ~= "" and self.query or ""),
         on_view = function(mode)
@@ -326,6 +327,7 @@ function Bookshelf:showSeriesActions(series)
             UIManager:close(dialog);self.navigation:enter(series);self.query="";self.selection:begin();self:_render()
         end}},
         {{text="删除系列本地文件",callback=function() UIManager:close(dialog);self:confirmDelete(series.books) end}},
+        {{text="下载系列未下载卷",callback=function() UIManager:close(dialog);self.downloader:enqueue(series.books) end}},
         {{text="关闭",callback=function() UIManager:close(dialog) end}},
     }}
     UIManager:show(dialog)
@@ -334,6 +336,9 @@ end
 function Bookshelf:showSelectionActions()
     local dialog
     dialog=ButtonDialog:new{title="已选 "..self.selection:count().." 卷",buttons={
+        {{text="加入下载队列",callback=function()
+            UIManager:close(dialog);self.downloader:enqueue(self.selection:resolve(self.library.items))
+        end}},
         {{text="删除所选本地文件",callback=function()
             UIManager:close(dialog);self:confirmDelete(self.selection:resolve(self.library.items))
         end}},

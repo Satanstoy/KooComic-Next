@@ -181,6 +181,7 @@ view:update{books={books[1],books[2]},mode="volumes",selection_active=true,selec
 assert(view.chrome.selection==true,"multi-select must replace the actual footer, not add another bar")
 assert(find(view,function(widget) return widget.text=="\239\128\140" end),"selected covers need a visible check glyph")
 assert(find(view,function(widget) return widget.description=="删除本地" end),"selection footer must expose local delete")
+assert(find(view,function(widget) return widget.description=="加入下载队列" end),"selection footer must expose a direct download command")
 view:update{selected_count=0,on_selection_delete=function() error("empty selection deletion") end}
 local empty_delete=find(view,function(widget) return widget.description=="删除本地" end)
 assert(not empty_delete.callback,"disabled empty-selection delete must not retain a tap callback")

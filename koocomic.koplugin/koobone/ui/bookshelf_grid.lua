@@ -486,8 +486,9 @@ function GridShelf:_buildChrome(layers, layout)
         local footer=HorizontalGroup:new{
             iconButton("menu",side,footer_h,self.options.on_selection_more),
             iconButton("previous",side,footer_h,self.page>1 and function() self:_changePage(self.page-1) end or nil,self.page<=1),
-            singleLine("已选 "..tostring(self.options.selected_count or 0),width-side*5,footer_h,14,{}),
+            singleLine("已选 "..tostring(self.options.selected_count or 0),width-side*6,footer_h,14,{}),
             iconButton("next",side,footer_h,self.page<self.pages and function() self:_changePage(self.page+1) end or nil,self.page>=self.pages),
+            iconButton("enqueue",side,footer_h,self.options.on_selection_download,(self.options.selected_count or 0)==0),
             iconButton("delete",side,footer_h,self.options.on_selection_delete,(self.options.selected_count or 0)==0),
             iconButton("cancel",side,footer_h,self.options.on_selection_cancel),
         }

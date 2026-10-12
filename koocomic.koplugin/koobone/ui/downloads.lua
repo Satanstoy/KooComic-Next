@@ -39,7 +39,12 @@ local function requireIdle(downloader, message)
     return false
 end
 
-function DownloadsUI.show(storage, downloader)
+function DownloadsUI.show(storage, downloader,history_only)
+    if downloader.service and not history_only then
+        return require("koobone.ui.download_queue").show(downloader.service,{
+            on_history=function() DownloadsUI.show(storage,downloader,true) end,
+            on_open=function(path) downloader:open(path) end})
+    end
     local menu
     local function refresh()
         if menu then UIManager:close(menu) end

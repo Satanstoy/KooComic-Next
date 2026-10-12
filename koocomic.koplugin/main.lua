@@ -18,6 +18,7 @@ local CatalogProbe = require("koobone.catalog_probe")
 local CatalogStore = require("koobone.catalog_store")
 local CoverCache = require("koobone.cover_cache")
 local Downloader = require("koobone.downloader")
+local DownloadService = require("koobone.download_service")
 local DownloadsUI = require("koobone.ui.downloads")
 local Library = require("koobone.library")
 local LoginDialog = require("koobone.ui.login_dialog")
@@ -50,12 +51,23 @@ function KooComic:init()
     self.preprocess = PreprocessService:get{storage=self.storage,
         directory=DataStorage:getSettingsDir().."/koocomic-preprocess"}
     self.storage.preprocess = self.preprocess
+    self.download_service=DownloadService:new{settings=self.settings,api=self.api,library=self.library,storage=self.storage,
+        coordinator=self.preprocess.coordinator,directory=DataStorage:getSettingsDir().."/koocomic-downloads",
+        on_changed=function()
+            if self.bookshelf and self.bookshelf.menu and #self.library.items>0 then self.bookshelf:show(self.library.items) end
+        end,
+        on_batch=function(result)
+            UIManager:show(InfoMessage:new{text=string.format("下载完成 %d，失败 %d，取消 %d，跳过 %d。\n已保存 %s，需核对 %d 项。",
+                result.completed,result.failed,result.cancelled,result.skipped,require("koobone.util").friendlySize(result.bytes),result.warnings)})
+        end}
     self.downloader = Downloader:new{
         api = self.api,
         library = self.library,
         storage = self.storage,
         preprocess = self.preprocess,
         coordinator = self.preprocess.coordinator,
+        service = self.download_service,
+        run_when_online=function(callback) self:ensureOnline(callback) end,
         on_changed = function()
             if self.bookshelf and self.bookshelf.menu and #self.library.items > 0 then
                 self.bookshelf:show(self.library.items)
@@ -218,6 +230,8 @@ function KooComic:showAccount()
         auth = self.auth,
         on_login = function() self:showLogin() end,
         on_logout = function()
+            require("koobone.ui.download_queue").closeAccountViews()
+            self.download_service:stop()
             self.library:clear()
             self.bookshelf.cover_generation=self.bookshelf.cover_generation+1
             self.bookshelf.navigation:setAccount("local")

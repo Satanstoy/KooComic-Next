@@ -170,6 +170,8 @@ local instance = Plugin:new{
     ui = { menu = { registerToMainMenu = function() end } },
 }
 instance:init()
+assert(instance.download_service and instance.downloader.service==instance.download_service,
+    "production main must bind the isolated queue instead of the legacy synchronous downloader")
 assert(instance.settings ~= nil)
 assert(instance.downloader ~= nil)
 assert(instance.updater ~= nil)

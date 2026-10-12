@@ -48,4 +48,17 @@ storage.resolveDownloadPath=function() return "/books/New name.epub" end
 local blocked=Downloader:new{storage=storage,library={},api={},coordinator={acquire=function() return nil end}}
 blocked:download{vol_name="New name"}
 assert(#scheduled==0 and recorded==0,"preprocessing resource contention must not change download state")
+local enqueued,resumed=0,false
+local batch=Downloader:new{storage=storage,library={},api={},service={
+    isActive=function() return true end,
+    preview=function() return {files=2,bytes=100,temporary_bytes=50,unknown=1,downloaded=1,duplicate=0,invalid=0,free=1000,account_id="one"} end,
+    enqueue=function(_,items,account) assert(#items==2 and account=="one");enqueued=2;return {added=2} end,
+    resume=function() resumed=true;return true end,account=function() return "one" end}}
+assert(type(batch.enqueue)=="function","production facade lacks confirmed batch enqueue")
+assert(batch:isActive())
+batch:enqueue({{file_md5="a"},{file_md5="b"}})
+assert(enqueued==0 and shown[#shown].ok_callback and shown[#shown].text:find("未知大小",1,true))
+assert(not shown[#shown].text:find("暂存最多",1,true),"unknown sizes cannot promise a maximum staging size")
+shown[#shown].ok_callback()
+assert(enqueued==2 and resumed and transfers==0,"new downloads must use the isolated queue service, not legacy synchronous IO")
 print("downloader path spec: OK")
