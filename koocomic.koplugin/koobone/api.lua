@@ -281,6 +281,7 @@ function Api:download(url, part_path, options)
             local ok, write_err = handle:write(chunk)
             if not ok then return nil, write_err end
             received = received + #chunk
+            if options.update_hash then options.update_hash(chunk) end
             if options.on_progress then options.on_progress(received, total_hint) end
         end
         return 1
@@ -307,7 +308,7 @@ function Api:download(url, part_path, options)
     if not response then return nil, err, received end
     if response.code ~= 200 then return nil, "HTTP " .. tostring(response.code), received end
     if received <= 0 then return nil, "下载内容为空", received end
-    return true, response.headers, received
+    return true, response.headers, received,options.update_hash and options.update_hash()
 end
 
 return Api

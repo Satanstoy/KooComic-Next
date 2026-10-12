@@ -22,6 +22,24 @@ assert(files:read(race_path)=="keep existing")
 local link_path=directory.."/link.epub.part"
 assert(lfs.link(race_path,link_path,true))
 assert(not files:exclusiveWriter(link_path) and files:read(race_path)=="keep existing")
+assert(type(files.renameNoReplace)=="function","validated downloads require atomic no-replace commit")
+local replacement=directory.."/replacement.epub"
+assert(files:write(replacement,"replacement"))
+assert(not files:renameNoReplace(replacement,race_path) and files:read(race_path)=="keep existing")
+local committed,commit_error=files:renameNoReplace(replacement,directory.."/committed.epub")
+assert(committed and not commit_error and not files:exists(replacement))
+assert(type(files.copyExclusive)=="function","validation staging needs a new inode immune to old partial-file writers")
+local duplicate=directory.."/private-copy.epub.part"
+local copy_digest=assert(files:copyExclusive(race_path,duplicate,files:identity(race_path),1024))
+assert(copy_digest==files:hash(duplicate) and files:identity(duplicate)~=files:identity(race_path))
+assert(not files:copyExclusive(race_path,duplicate,files:identity(race_path),1024))
+local interrupted=directory.."/interrupted-copy.epub.part"
+local claimed
+assert(not files:copyExclusive(race_path,interrupted,files:identity(race_path),1,function(_,identity) claimed=identity;return true end))
+assert(claimed and files:identity(interrupted)==claimed,"a failed copy must retain ownership recorded before writing bytes")
+local caught,copied=pcall(files.copyExclusive,files,race_path,directory.."/throw-copy.epub.part",files:identity(race_path),1024,
+    function() error("ownership write failed") end)
+assert(caught and not copied,"ownership callback errors must close descriptors and return failure")
 local source=directory.."/source.epub"
 local writer=Archive.Writer:new();assert(writer:open(source,"zip"));assert(writer:setZipCompression("store"))
 assert(writer:addFileFromMemory("mimetype","application/epub+zip"))
@@ -72,9 +90,63 @@ local function tests()
     local handle=assert(transport:start({entry={}},directory.."/cancel.epub.part",function(value) result=value;finished=true end))
     assert(handle.cancel());pump()
     assert(result.error_code=="worker_failed" and not files:exists(directory.."/cancel.epub.part"))
+    local Storage=require("koobone.storage")
+    local records={}
+    local storage=Storage:new{download=function() return {directory=directory.."/downloads",records=records} end,
+        flush=function() end}
+    assert(files:mkdir(directory.."/downloads"))
+    local account="fixture-account"
+    transport.resolve=function() return {file_url=base.."/source.epub"} end
+    local worker=require("koobone.download_worker"):new{files=files,storage=storage,transport=transport,
+        directory=directory.."/jobs",account=function() return account end,is_in_use=function() return false end,
+        schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
+    local queue=require("koobone.download_queue"):new{account_id=account,
+        worker=worker,coordinator=require("koobone.resource_coordinator"):new(),checkpoint=function() return true end}
+    local batch={}
+    for index=1,20 do batch[index]={file_md5="generated-"..index,vol_name="Generated "..index,file_size=job.entry.remote_size} end
+    assert(queue:add(batch).added==20 and queue:resume())
+    for _=1,4000 do
+        if not queue.active then queue:tick() end
+        local all=true;for _,entry in ipairs(queue.jobs) do if entry.state~="completed" then all=false end end
+        if all then break end
+        local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+        ffi.C.usleep(5000)
+    end
+    for index,entry in ipairs(queue.jobs) do
+        assert(entry.state=="completed",entry.error_code)
+        assert(files:hash(storage:itemPath(batch[index]))==files:hash(source))
+    end
+    local rename=files.renameNoReplace
+    files.renameNoReplace=function(self,from,to)
+        assert(self:write(to,"foreign file created during commit"))
+        return rename(self,from,to)
+    end
+    assert(queue:add({{file_md5="conflict",vol_name="Conflict",file_size=job.entry.remote_size}}).added==1)
+    for _=1,400 do
+        if not queue.active then queue:tick() end
+        if queue.jobs[21].state=="failed" then break end
+        local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+        ffi.C.usleep(5000)
+    end
+    assert(queue.jobs[21].state=="failed" and files:read(directory.."/downloads/Conflict.epub")=="foreign file created during commit")
+    files.renameNoReplace=rename
+    files.renameNoReplace=function(self,from,to)
+        if to==directory.."/downloads/Source race.epub" then assert(self:write(to..".part","late source change")) end
+        return rename(self,from,to)
+    end
+    assert(queue:add({{file_md5="source-race",vol_name="Source race",file_size=job.entry.remote_size}}).added==1)
+    for _=1,400 do
+        if not queue.active then queue:tick() end
+        if queue.jobs[22].state=="completed" or queue.jobs[22].state=="failed" then break end
+        local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+        ffi.C.usleep(5000)
+    end
+    assert(queue.jobs[22].state=="completed" and files:hash(directory.."/downloads/Source race.epub")==files:hash(source),
+        "changing the public partial at commit time must not publish unvalidated bytes")
+    files.renameNoReplace=rename
 end
 local ok,err=pcall(tests)
 Util.terminateSubProcess(server)
 for _=1,100 do if Util.isSubProcessDone(server) then break end;ffi.C.usleep(5000) end
 assert(ok,err)
-print("KOReader real HTTP download transport integration: OK (parent commit not connected)")
+print("KOReader real HTTP download integration: OK (20 serial commits and external-file race)")

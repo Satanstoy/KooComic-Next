@@ -8,6 +8,7 @@ local worker={asynchronous=true,start=function(_,job,events)
     started[#started+1]=job;callbacks[#callbacks+1]=events
     return {cancel=function() return true end}
 end}
+local normal_start=worker.start
 local function item(id,size)
     return {vol_id=id,file_md5="version-"..id,vol_name="Original title "..id,file_size=size,
         file_url="https://private.invalid/?signature=secret",cookie="do-not-save"}
@@ -96,4 +97,13 @@ local fail_restore=Queue:new{account_id="test-account",coordinator=coordinator,w
 fail_restore.paused=false
 assert(not fail_restore:restore(queue:snapshot()) and #fail_restore.jobs==0 and fail_restore.paused,
     "restore checkpoint failure must preserve old jobs and stop launching workers")
+queue.worker.start=function() return nil,"no_space" end
+assert(queue:add({item("no-space")}).added==1 and queue:resume())
+assert(not queue:tick() and queue.jobs[#queue.jobs].error_code=="no_space","startup failures must preserve typed nonretryable reasons")
+assert(queue:retry(queue.jobs[1].id,true),"verified missing completed output must allow explicit re-download")
+assert(queue.jobs[1].output_fingerprint==nil and queue.jobs[1].bytes==0)
+worker.start=normal_start;queue.worker=worker
+assert(queue:tick())
+callbacks[#callbacks].done(true,{validated=true,committed=true,bytes=100,output_fingerprint=string.rep("c",64),warning="metadata_warning"})
+assert(queue.jobs[1].warning=="metadata_warning" and queue:snapshot().jobs[1].warning=="metadata_warning")
 print("download queue spec: OK")

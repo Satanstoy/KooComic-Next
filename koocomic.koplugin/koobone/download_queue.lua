@@ -27,6 +27,7 @@ local states={pending=true,preparing=true,downloading=true,validating=true,compl
     failed=true,cancelled=true,interrupted=true}
 local errors={worker_failed=true,cancelled=true,interrupted=true,network=true,unauthorized=true,forbidden=true,
     no_space=true,path_conflict=true,invalid_epub=true,account_changed=true}
+local warnings={metadata_warning=true,durability_warning=true}
 
 local function entry(account,raw)
     local normalized=Entry.normalize(account,raw)
@@ -118,6 +119,7 @@ function Queue:tick()
             (job.entry.remote_size==nil or job.entry.remote_size==result.bytes)
         if valid then
             job.state,job.bytes,job.total,job.output_fingerprint,job.error_code="completed",result.bytes,result.bytes,result.output_fingerprint,nil
+            job.warning=warnings[result.warning] and result.warning or nil
         else
             job.state=active.cancel_requested and "cancelled" or "failed"
             job.error_code=active.cancel_requested and "cancelled" or
@@ -125,7 +127,7 @@ function Queue:tick()
         end
         self.active=nil;self.coordinator:release(token);self:_save()
     end
-    local called,handle=pcall(self.worker.start,self.worker,copy(job),{
+    local called,handle,start_error=pcall(self.worker.start,self.worker,copy(job),{
         stage=function(state)
             if self.active~=active or active.cancel_requested then return end
             if (job.state=="preparing" and state=="downloading") or (job.state=="downloading" and state=="validating") then
@@ -140,7 +142,10 @@ function Queue:tick()
         end,
         done=done,
     })
-    if not called or type(handle)~="table" or type(handle.cancel)~="function" then done(false);return nil,"worker start failed" end
+    if not called or type(handle)~="table" or type(handle.cancel)~="function" then
+        done(false,{error_code=called and errors[start_error] and start_error or "worker_failed"})
+        return nil,"worker start failed"
+    end
     active.handle=handle
     return true
 end
@@ -167,13 +172,17 @@ function Queue:cancel(id)
     return nil,"unknown job"
 end
 
-function Queue:retry(id)
+function Queue:retry(id,output_invalidated)
     for _,job in ipairs(self.jobs) do
-        if job.id==id and (job.state=="failed" or job.state=="cancelled" or job.state=="interrupted") then
-            local old={state=job.state,error_code=job.error_code,bytes=job.bytes,total=job.total}
-            job.state,job.error_code,job.bytes,job.total="pending",nil,0,job.entry.remote_size
+        if job.id==id and (job.state=="failed" or job.state=="cancelled" or job.state=="interrupted" or
+                (job.state=="completed" and output_invalidated==true)) then
+            local old={state=job.state,error_code=job.error_code,bytes=job.bytes,total=job.total,output_fingerprint=job.output_fingerprint,warning=job.warning}
+            job.state,job.error_code,job.bytes,job.total,job.output_fingerprint="pending",nil,0,job.entry.remote_size,nil
+            job.warning=nil
             if not self:_save() then
                 job.state,job.error_code,job.bytes,job.total=old.state,old.error_code,old.bytes,old.total
+                job.output_fingerprint=old.output_fingerprint
+                job.warning=old.warning
                 return nil,"checkpoint failed"
             end
             return true
@@ -200,6 +209,7 @@ function Queue:restore(snapshot)
                 not counter(value.attempts) or not counter(value.bytes) or
                 (value.total~=nil and (not counter(value.total) or value.total==0 or value.total<value.bytes)) or
                 (value.error_code~=nil and not errors[value.error_code]) or
+                (value.warning~=nil and not warnings[value.warning]) or
                 (value.output_fingerprint~=nil and (type(value.output_fingerprint)~="string" or
                     #value.output_fingerprint~=64 or not value.output_fingerprint:match("^%x+$"))) or
                 (value.state=="completed" and (not value.output_fingerprint or value.attempts==0 or value.bytes==0 or
@@ -207,7 +217,7 @@ function Queue:restore(snapshot)
             return nil,"invalid job"
         end
         local job={id=value.id,entry=normalized,state=value.state,attempts=value.attempts,bytes=value.bytes,
-            total=value.total,error_code=value.error_code,output_fingerprint=value.output_fingerprint}
+            total=value.total,error_code=value.error_code,output_fingerprint=value.output_fingerprint,warning=value.warning}
         if job.state=="preparing" or job.state=="downloading" or job.state=="validating" then
             job.state,job.error_code="interrupted","interrupted"
         end

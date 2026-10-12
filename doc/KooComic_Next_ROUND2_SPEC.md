@@ -113,3 +113,11 @@ DownloadTransport复用AsyncTask实际独立进程，执行注入的签名解析
 34组Lua回归及官方runtime实际localhost HTTP传输生成EPUB、HTML拒绝、立即取消和worker回收通过；native文件测试验证既有文件/链接不会被截断。原有真实处理EPUB集成仍通过。本机SDK头确认ARM排他/no-follow标志；并不证明Colorsoft openat动态ABI已验收。
 
 仍未接main、真实账号签名解析、进度UI、空间预估、自动重试或主进程账号/占用复核和原子提交。返回committed=false，不能直接给Queue判为completed；D1.2b与D1.3仍是下一单位。取消/失败.part保留，但未开放带归属校验的部分文件重试。
+
+### D1.2b后端检查点
+
+Worker/Service已实现主进程账号/阅读占用/新指纹复核、任务claim、归属安全重试、原子NOREPLACE提交和启动对账。签名解析依赖父进程完整目录的60秒内存索引，到期用已有异步全量同步刷新，不在子进程写共享Catalog缓存。网络失败自动最多两次重试，其他错误不自动重试；队列暂停阻止下一卷。
+
+传输字节先流式SHA，再从锚定源FD复制到下载根私有目录的新inode，副本SHA必须匹配网络字节；验证/提交使用该私有副本，公开.part在提交前被改写也不会把错误字节发布为完成。stage排他创建后首字节前记录inode，取消/写失败仍可按claim清理重试。NOREPLACE保护外部新目标文件，文件提交成功后的目录sync/记录异常以完成＋警告反映事实，不伪装普通下载失败。
+
+空间预算包含双份暂存，已知批次要求最终总字节＋最大单卷暂存＋保留量，未知大小执行预算减半。批次保留跳过分类计数，但跨重启batch metadata及main/UI尚待后续接入。36组Lua回归；官方runtime实际HTTP20卷串行、目标竞争、公开源变更、原子保存与复制中断归属通过。未重跑真实KOOBONE账号或Colorsoft，发布门槛未通过。

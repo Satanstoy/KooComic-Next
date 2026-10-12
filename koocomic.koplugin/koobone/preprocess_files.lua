@@ -6,6 +6,27 @@ local Json=require("json")
 local Files={}
 Files.__index=Files
 
+local function openParent(path)
+    local ffi=require("ffi")
+    if ffi.os~="Linux" then return nil,"anchored output unavailable" end
+    ffi.cdef[[int openat(int, const char *, int, ...); long syscall(long, ...);]]
+    local C=ffi.C
+    local directory_flag=ffi.arch=="arm" and 16384 or 65536
+    local nofollow=ffi.arch=="arm" and 32768 or 131072
+    local flags=C.O_RDONLY+C.O_CLOEXEC+directory_flag+nofollow
+    local parent=C.open("/",flags)
+    if parent<0 then return nil,"cannot anchor directory" end
+    local parts={};for component in path:gmatch("[^/]+") do parts[#parts+1]=component end
+    if #parts==0 then C.close(parent);return nil,"invalid file name" end
+    for index=1,#parts-1 do
+        local next_fd=C.openat(parent,parts[index],flags)
+        C.close(parent)
+        if next_fd<0 then return nil,"unsafe output ancestor" end
+        parent=next_fd
+    end
+    return parent,parts[#parts],nofollow,ffi
+end
+
 function Files:new(options)
     return setmetatable({roots=assert(options.roots)},self)
 end
@@ -54,27 +75,20 @@ end
 
 function Files:exclusiveWriter(path)
     if not self:isSafe(path) then return nil,"unsafe exclusive output" end
-    local ffi=require("ffi")
-    if ffi.os~="Linux" then return nil,"exclusive output unavailable" end
-    ffi.cdef[[int openat(int, const char *, int, ...);]]
+    local parent,name,nofollow,ffi=openParent(path)
+    if not parent then return nil,name end
     local C=ffi.C
-    local directory_flag=ffi.arch=="arm" and 16384 or 65536
-    local nofollow=ffi.arch=="arm" and 32768 or 131072
-    local directory_flags=C.O_RDONLY+C.O_CLOEXEC+directory_flag+nofollow
-    local parent=C.open("/",directory_flags)
-    if parent<0 then return nil,"cannot anchor output directory" end
-    local parts={};for component in path:gmatch("[^/]+") do parts[#parts+1]=component end
-    for index=1,#parts-1 do
-        local next_fd=C.openat(parent,parts[index],directory_flags)
-        C.close(parent)
-        if next_fd<0 then return nil,"unsafe output ancestor" end
-        parent=next_fd
-    end
-    local fd=C.openat(parent,parts[#parts],C.O_WRONLY+C.O_CREAT+C.O_CLOEXEC+128+nofollow,ffi.cast("int",384))
+    local largefile=ffi.arch=="arm" and 131072 or 0
+    local fd=C.openat(parent,name,C.O_WRONLY+C.O_CREAT+C.O_CLOEXEC+128+nofollow+largefile,ffi.cast("int",384))
     C.close(parent)
     if fd<0 then return nil,"output exists or cannot be created" end
     local owner=ffi.gc(ffi.new("int[1]",fd),function(value) if value[0]>=0 then C.close(value[0]) end end)
     return {
+        identity=function()
+            if owner[0]<0 then return nil end
+            local stat=lfs.attributes("/proc/self/fd/"..tonumber(owner[0]))
+            return stat and tostring(stat.dev)..":"..tostring(stat.ino) or nil
+        end,
         write=function(_,data)
             if owner[0]<0 then return nil,"output is closed" end
             local offset=0
@@ -92,6 +106,78 @@ function Files:exclusiveWriter(path)
             return true
         end,
     }
+end
+
+function Files:identity(path)
+    if not self:isSafe(path) then return nil end
+    local stat=lfs.attributes(path)
+    if not stat or stat.mode~="file" or (stat.nlink or 1)~=1 then return nil end
+    return tostring(stat.dev)..":"..tostring(stat.ino)
+end
+
+function Files:copyExclusive(source,target,expected,max_bytes,on_created)
+    if not self:isSafe(source) or not self:isSafe(target) then return nil,"unsafe capture" end
+    local parent,name,nofollow,ffi=openParent(source)
+    if not parent then return nil,name end
+    local C=ffi.C
+    local source_fd=C.openat(parent,name,C.O_RDONLY+C.O_CLOEXEC+nofollow+(ffi.arch=="arm" and 131072 or 0))
+    C.close(parent)
+    if source_fd<0 then return nil,"cannot capture source" end
+    local stat=lfs.attributes("/proc/self/fd/"..tonumber(source_fd))
+    if not stat or stat.mode~="file" or (stat.nlink or 1)~=1 or tostring(stat.dev)..":"..tostring(stat.ino)~=expected then
+        C.close(source_fd);return nil,"source identity changed"
+    end
+    local output,err=self:exclusiveWriter(target)
+    if not output then C.close(source_fd);return nil,err end
+    local output_identity=output:identity()
+    local owned=true
+    if on_created then local called,result=pcall(on_created,target,output_identity);owned=called and result end
+    if not owned then
+        C.close(source_fd);output:close()
+        if self:identity(target)==output_identity then self:remove(target) end
+        return nil,"capture ownership could not be saved"
+    end
+    local update=Sha.sha256()
+    local buffer,bytes=ffi.new("unsigned char[65536]"),0
+    local valid=true
+    while true do
+        local count=tonumber(C.read(source_fd,buffer,65536))
+        if count==0 then break end
+        if count<0 then
+            if ffi.errno()~=C.EINTR then valid=false;break end
+        else
+            bytes=bytes+count
+            if bytes>max_bytes then valid=false;break end
+            local chunk=ffi.string(buffer,count);update(chunk)
+            if not output:write(chunk) then valid=false;break end
+        end
+    end
+    C.close(source_fd)
+    local identity=output:identity()
+    local closed=output:close()
+    if not valid or not closed or bytes~=stat.size or not self:sync(target) then return nil,"capture failed" end
+    return update(),bytes,identity
+end
+
+function Files:renameNoReplace(source,target)
+    local directory=source:match("^(.*)/[^/]+$")
+    if not self:identity(source) or not self:isSafe(target) then
+        return nil,"unsafe commit paths"
+    end
+    local parent,name,_,ffi=openParent(source)
+    if not parent then return nil,name end
+    local target_parent,target_name=openParent(target)
+    if not target_parent then ffi.C.close(parent);return nil,target_name end
+    local number=({x64=316,arm=382,arm64=276})[ffi.arch]
+    if not number then ffi.C.close(parent);ffi.C.close(target_parent);return nil,"atomic commit unavailable" end
+    local status=ffi.C.syscall(ffi.cast("long",number),ffi.cast("int",parent),ffi.cast("const char*",name),
+        ffi.cast("int",target_parent),ffi.cast("const char*",target_name),ffi.cast("unsigned int",1))
+    local synced=status==0 and ffi.C.fsync(target_parent)==0 and ffi.C.fsync(parent)==0
+    ffi.C.close(parent)
+    ffi.C.close(target_parent)
+    if status~=0 then return nil,"destination exists or commit unavailable" end
+    if not synced then return true,"directory sync failed" end
+    return true
 end
 
 function Files:write(path,data)
