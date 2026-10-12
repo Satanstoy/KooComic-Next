@@ -106,10 +106,12 @@ end
 function Updater:_packageUrlAllowed(url)
     return self:isConfigured() and type(url) == "string"
         and url:sub(1, #self.release_prefix) == self.release_prefix
+        and url:sub(#self.release_prefix+1):match("^v%d+%.%d+%.%d+/[%w_.%-]+%.zip$")~=nil
 end
 
 function Updater:_validateManifest(data)
     if type(data) ~= "table" then return nil, "更新清单格式无效" end
+    if data.product_id~="koocomic-next" then return nil,"更新清单不属于 KooComic Next" end
     local version = tostring(data.version or "")
     if not Util.compareVersions(version, version) then return nil, "版本号格式无效" end
     if data.channel ~= nil and data.channel ~= "stable" then return nil, "不是正式版更新" end
@@ -119,7 +121,7 @@ function Updater:_validateManifest(data)
     local package_url = data.package_url
     if not self:_packageUrlAllowed(package_url) then return nil, "更新包地址不在允许范围内" end
     local size = tonumber(data.size)
-    if not size or size <= 0 or size > self.MAX_PACKAGE_BYTES then
+    if not size or size~=size or size <= 0 or size > self.MAX_PACKAGE_BYTES or size~=math.floor(size) then
         return nil, "更新包大小无效"
     end
     local sha256 = tostring(data.sha256 or ""):lower():gsub("%s+", "")
@@ -127,6 +129,7 @@ function Updater:_validateManifest(data)
         return nil, "更新包缺少有效 SHA-256"
     end
     return {
+        product_id = "koocomic-next",
         version = version,
         package_url = package_url,
         size = size,
@@ -247,9 +250,11 @@ function Updater:_extractPackage(archive_path, stage_path)
 end
 
 function Updater:install(release, on_progress)
-    if not release or not self:_packageUrlAllowed(release.package_url) then
+    local validated=self:_validateManifest(release)
+    if not validated or Util.compareVersions(validated.version,self.current_version)~=1 then
         return nil, "更新信息无效"
     end
+    release=validated
     local function report(stage, percent, current, total)
         if on_progress then
             on_progress{

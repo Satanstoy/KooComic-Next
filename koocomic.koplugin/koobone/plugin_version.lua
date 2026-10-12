@@ -1,6 +1,7 @@
 return {
     version = "0.4.1",
 
-    manifest_url = "https://jackchensky.github.io/KooComic/update.json",
-    release_prefix = "https://github.com/jackchensky/KooComic/releases/download/",
+    product_id = "koocomic-next",
+    manifest_url = "https://satanstoy.github.io/KooComic-Next/update.json",
+    release_prefix = "https://github.com/Satanstoy/KooComic-Next/releases/download/",
 }

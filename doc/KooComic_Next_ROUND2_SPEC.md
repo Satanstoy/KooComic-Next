@@ -121,6 +121,14 @@ CoverCache复用有界AsyncTask独立进程；每个缓存实例最多一个子�
 拼贴仍最多取四个成员。37组回归及实际localhost PNG HTTP子进程PID、
 异步立即返回和缓存指纹测试通过。设备输入响应/内存门槛仍待真机验收。
 
+### R2-19更新源隔离检查点
+
+Next使用Satanstoy/KooComic-Next发行前缀及自己的Pages清单地址。
+清单必须携带product_id=koocomic-next；安装时重新验证来源、产品、
+版本、有限整数大小和SHA，拒绝旧上游缓存、非升级与URL路径穿越。
+本地包构建加入产品身份并通过37组回归；没有发布版本/清单，地址是
+预定渠道而非已上线服务。事务升级/失败回滚及v4迁移仍需后续验收。
+
 ### D1.2a独立传输证据
 
 DownloadTransport复用AsyncTask实际独立进程，执行注入的签名解析和生产Api下载，仅返回校验后的.part、字节和SHA，不保存签名地址、不提交最终EPUB。共享EPUB解析新增只读验证，核对ZIP头、结构/manifest/spine与全部资源CRC/大小。已有.part拒写，使用从/逐级openat锚定且不跟随链接的排他fd，Api消耗fd而不重新按路径打开，避免检查/创建之间覆盖外部文件。

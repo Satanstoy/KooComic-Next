@@ -83,6 +83,7 @@ if not isinstance(notes, list) or not notes or not all(isinstance(note, str) and
     raise SystemExit("Release notes must contain at least one non-empty note")
 
 manifest = {
+    "product_id": "koocomic-next",
     "version": version,
     "channel": "stable",
     "package_type": "full",
