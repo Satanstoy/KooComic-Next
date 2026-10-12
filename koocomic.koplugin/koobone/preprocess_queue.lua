@@ -73,9 +73,10 @@ function Queue:tick()
     end
     local function done(ok, result)
         if self.active ~= active then return end
-        ok = ok and job.state == "validating" and type(result) == "table" and
+        local committed = type(result)=="table" and result.committed==true
+        ok = ok and (job.state == "validating" or committed) and type(result) == "table" and
             result.validated == true and type(result.output_fingerprint) == "string" and result.output_fingerprint ~= ""
-        job.state = active.cancel_requested and "cancelled" or (ok and "completed" or "failed")
+        job.state = ok and committed and "completed" or (active.cancel_requested and "cancelled" or (ok and "completed" or "failed"))
         if not ok and not active.cancel_requested then job.error = "worker failed" end
         if ok and type(result) == "table" and type(result.output_fingerprint) == "string" then
             job.output_fingerprint = result.output_fingerprint
@@ -107,11 +108,14 @@ function Queue:tick()
     return true
 end
 
-function Queue:retry(id)
-    for _, job in ipairs(self.jobs) do
-        if job.id == id and (job.state == "failed" or job.state == "cancelled") then
+function Queue:retry(id, output_invalidated)
+    for index, job in ipairs(self.jobs) do
+        if job.id == id and (job.state == "failed" or job.state == "cancelled" or
+                (job.state == "completed" and output_invalidated == true)) then
             job.state, job.error, job.output_fingerprint = "pending", nil, nil
             job.processed_pages, job.total_pages = 0, nil
+            table.remove(self.jobs,index)
+            self.jobs[#self.jobs+1]=job
             return self:_save()
         end
     end

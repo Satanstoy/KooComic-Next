@@ -28,6 +28,7 @@ local request = { source_path = "/books/book.epub", temporary_path = "/books/boo
 fail_copy = true
 assert(transaction:commit(request) == nil)
 assert(files[request.source_path] == "original", "failed backup must never replace the reading file")
+assert(#logs>0 and logs[#logs].state=="backing_up", "backup ownership must be journaled before copying bytes")
 fail_copy, valid = false, false
 assert(transaction:commit(request) == nil)
 assert(files[request.source_path] == "original", "failed EPUB validation must preserve the original")

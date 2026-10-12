@@ -114,6 +114,15 @@ assert(#cleanup.errors == 0)
 assert(files[part_path] == nil)
 assert(download.records[key] == nil)
 assert(flush_count >= 4)
+files[final_path]={size=20000}
+storage:record(item,"complete")
+storage.preprocess={isLocked=function() return true end}
+assert(storage:deleteItem(item)==nil and files[final_path],"processing must lock deletion of the reading file")
+local cleaned=false
+storage.preprocess={isLocked=function() return false end,cleanup=function(_,path)
+    assert(path==final_path);cleaned=true;return true,500 end}
+local deleted,bytes=storage:deleteItem(item)
+assert(deleted and cleaned and bytes==20500,"confirmed deletion must also clean and count preprocessing artifacts")
 
 os.remove = original_remove
 

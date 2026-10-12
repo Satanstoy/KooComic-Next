@@ -17,6 +17,8 @@ function Downloader:new(options)
         active = false,
         cancelled = false,
         on_changed = options.on_changed,
+        preprocess = options.preprocess,
+        coordinator = options.coordinator,
     }, self)
 end
 
@@ -25,10 +27,18 @@ function Downloader:isActive()
 end
 
 function Downloader:open(path)
+    if self.preprocess and self.preprocess:isLocked(path) then
+        UIManager:show(InfoMessage:new{text="这本漫画正在处理，请等待任务结束后再阅读。"})
+        return nil
+    end
     ReaderUI:showReader(path)
 end
 
 function Downloader:_finishChanged()
+    if not self.active and self.resource_token then
+        self.coordinator:release(self.resource_token)
+        self.resource_token=nil
+    end
     if self.on_changed then pcall(self.on_changed) end
 end
 
@@ -61,6 +71,13 @@ function Downloader:download(item)
         return
     end
 
+    if self.coordinator then
+        self.resource_token=self.coordinator:acquire("download")
+        if not self.resource_token then
+            UIManager:show(InfoMessage:new{text="正在进行图像处理或文件校验，请稍后再下载。"})
+            return
+        end
+    end
     self.active = true
     self.cancelled = false
     self.storage:record(item, "preparing")

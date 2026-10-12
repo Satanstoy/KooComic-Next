@@ -21,6 +21,8 @@ local DownloadsUI = require("koobone.ui.downloads")
 local Library = require("koobone.library")
 local LoginDialog = require("koobone.ui.login_dialog")
 local PluginVersion = require("koobone.plugin_version")
+local PreprocessService = require("koobone.preprocess_service")
+local PreprocessUI = require("koobone.ui.preprocess")
 local Settings = require("koobone.settings")
 local SettingsUI = require("koobone.ui.settings")
 local Storage = require("koobone.storage")
@@ -43,10 +45,15 @@ function KooComic:init()
     self.storage = Storage:new(self.settings)
     self.cover_cache = CoverCache:new(self.api)
     self.library = Library:new(self.api, self.storage)
+    self.preprocess = PreprocessService:get{storage=self.storage,
+        directory=DataStorage:getSettingsDir().."/koocomic-preprocess"}
+    self.storage.preprocess = self.preprocess
     self.downloader = Downloader:new{
         api = self.api,
         library = self.library,
         storage = self.storage,
+        preprocess = self.preprocess,
+        coordinator = self.preprocess.coordinator,
         on_changed = function()
             if self.bookshelf and self.bookshelf.menu and #self.library.items > 0 then
                 self.bookshelf:show(self.library.items)
@@ -70,6 +77,8 @@ function KooComic:init()
         downloader = self.downloader,
         settings = self.settings,
         cover_cache = self.cover_cache,
+        preprocess = self.preprocess,
+        on_preprocess = function() PreprocessUI.show(self.storage,self.preprocess) end,
         on_downloads = function() self:showDownloads() end,
         on_account = function() self:showAccount() end,
         on_settings = function() self:showSettings() end,
@@ -98,6 +107,10 @@ function KooComic:addToMainMenu(menu_items)
             {
                 text = "下载管理",
                 callback = function() self:showDownloads() end,
+            },
+            {
+                text = "图像优化 / 去彩纹管理",
+                callback = function() PreprocessUI.show(self.storage,self.preprocess) end,
             },
             {
                 text = "账号与登录",

@@ -177,9 +177,12 @@ assert(instance.updater ~= nil)
 local menu = {}
 instance:addToMainMenu(menu)
 local probe_action
+local preprocess_action
 for _, action in ipairs(menu.koocomic.sub_item_table) do
     if action.text == "书库能力探测（只读）" then probe_action = action end
+    if action.text == "图像优化 / 去彩纹管理" then preprocess_action = action end
 end
+assert(preprocess_action and instance.preprocess, "independent preprocessing is not connected to the actual plugin")
 assert(probe_action, "the read-only catalog probe menu is not implemented")
 local limits = {}
 instance.auth.restore = function() return true end

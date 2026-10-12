@@ -19,6 +19,8 @@ function Bookshelf:new(options)
         downloader = assert(options.downloader, "downloader required"),
         settings = assert(options.settings, "settings required"),
         cover_cache = options.cover_cache,
+        preprocess = options.preprocess,
+        on_preprocess = options.on_preprocess,
         on_downloads = options.on_downloads,
         on_account = options.on_account,
         on_settings = options.on_settings,
@@ -167,6 +169,7 @@ function Bookshelf:_gridOptions(books)
                 storage = self.storage,
                 downloader = self.downloader,
                 settings = self.settings,
+                preprocess = self.preprocess,
             }
         end,
         on_refresh = function() self:refresh() end,
@@ -218,6 +221,7 @@ function Bookshelf:_items(books)
                     storage = self.storage,
                     downloader = self.downloader,
                     settings = self.settings,
+                    preprocess = self.preprocess,
                 }
             end,
         }
@@ -372,6 +376,10 @@ function Bookshelf:showMore()
         buttons = {
             {{text="排序",callback=function() UIManager:close(dialog); self:showSort() end},
              {text="筛选",callback=function() UIManager:close(dialog); self:showFilter() end}},
+            {{text="图像优化 / 去彩纹管理",callback=function()
+                UIManager:close(dialog)
+                if self.on_preprocess then self.on_preprocess() end
+            end}},
             {
                 {
                     text = "刷新书架",

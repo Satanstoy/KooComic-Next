@@ -57,6 +57,29 @@ function BookDetail.show(options)
         end
     end
     if downloaded then
+        if options.preprocess then
+            local service=options.preprocess
+            local path=storage:resolveLocalPath(item)
+            local record=path and service:record(path)
+            local function perform(restore)
+                if not service.available then UIManager:show(InfoMessage:new{text=tostring(service.reason)});return end
+                UIManager:show(ConfirmBox:new{
+                    text=(restore and "恢复这本漫画的原版文件？" or "处理这本漫画的彩纹？原版将保留为内部备份。").."\n\n"..title,
+                    ok_text=restore and "恢复原版" or "开始处理",
+                    ok_callback=function()
+                        local ok,err
+                        if restore then ok,err=service:restore(item) else ok,err=service:submit(item) end
+                        if ok then ok,err=service:resume() end
+                        if not ok then UIManager:show(InfoMessage:new{text=tostring(err or "处理不可用")})
+                        else dialog:close();changed() end
+                    end,
+                })
+            end
+            buttons[#buttons+1]={{text="去彩纹处理",enabled=service.available and not service:isLocked(path),
+                callback=function() perform(false) end}}
+            if record then buttons[#buttons+1]={{text="恢复原版",enabled=service.available and not service:isLocked(path),
+                callback=function() perform(true) end}} end
+        end
         buttons[#buttons + 1] = {
             {
                 text = "删除本地漫画",
@@ -78,6 +101,7 @@ function BookDetail.show(options)
                             title,
                             Util.friendlySize(size),
                             path,
+                            options.preprocess and "同时清理这本漫画的内部原版备份（如有）。" or "",
                             "",
                             "不会删除 KOOBONE 云端书库中的漫画或阅读记录。",
                         }, "\n"),

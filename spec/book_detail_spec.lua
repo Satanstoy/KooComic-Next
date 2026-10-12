@@ -33,4 +33,18 @@ opened = nil
 storage.resolveLocalPath = function() return nil, "missing" end
 dialog.buttons[1][2].callback()
 assert(opened == nil, "a file removed after rendering must not be opened")
+storage.resolveLocalPath=function() return "/books/Original title.epub" end
+local submitted=0
+dialog=BookDetail.show{item={vol_name="New title"},storage=storage,downloader=downloader,
+    preprocess={available=true,submit=function() submitted=submitted+1;return true end,
+        resume=function() return true end,record=function() return nil end,isLocked=function() return false end}}
+local optimize
+for _, row in ipairs(dialog.buttons) do for _, button in ipairs(row) do
+    if button.text=="去彩纹处理" then optimize=button end
+end end
+assert(optimize,"downloaded comics need a real preprocessing action in details")
+optimize.callback()
+assert(submitted==0,"processing must wait for user confirmation")
+shown[#shown].ok_callback()
+assert(submitted==1)
 print("book detail spec: OK")

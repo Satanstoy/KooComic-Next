@@ -198,11 +198,19 @@ function Storage:removeRecord(key)
 end
 
 function Storage:_deleteRecordFiles(key, final_path, part_path, delete_final, delete_part)
+    if self.preprocess and (self.preprocess:isLocked(final_path) or self.preprocess:isLocked(part_path)) then
+        return nil,"这本漫画正在处理，请先取消并等待任务结束。"
+    end
     local removed_bytes = 0
     if delete_final then
         local ok, size_or_err = removeFile(final_path)
         if not ok then return nil, size_or_err end
         removed_bytes = removed_bytes + (tonumber(size_or_err) or 0)
+        if self.preprocess and self.preprocess.cleanup then
+            local cleaned,bytes=self.preprocess:cleanup(final_path)
+            if not cleaned then return nil,"阅读文件已删除，内部备份清理失败："..tostring(bytes) end
+            removed_bytes=removed_bytes+(tonumber(bytes) or 0)
+        end
     end
     if delete_part then
         local ok, size_or_err = removeFile(part_path)

@@ -52,7 +52,18 @@ jobs:
       - name: Build and test host preprocessing prototype
         run: |
           make -C native/preprocess
+          make -C native/preprocess smoke
           python3 spec/native_preprocess_spec.py
+
+      - name: Verify real EPUB processing in the official KOReader runtime
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 https://github.com/koreader/koreader/releases/download/v2026.07.1/koreader-linux-x86_64-v2026.07.1.tar.xz -o /tmp/koreader.tar.xz
+          printf '%s  /tmp/koreader.tar.xz\n' 299aadb28147a25e9432ced1214ea444a4184393b5ae97cf42402c8a61b1a1b0 | sha256sum -c -
+          mkdir -p /tmp/koreader-runtime /tmp/koocomic-epub-test
+          tar -xf /tmp/koreader.tar.xz -C /tmp/koreader-runtime
+          cd /tmp/koreader-runtime/lib/koreader
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_epub_integration.lua" "$GITHUB_WORKSPACE" /tmp/koocomic-epub-test
 
       - name: Build a test release package
         shell: bash

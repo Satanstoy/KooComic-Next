@@ -42,7 +42,10 @@ function Transaction:commit(request)
     if type(size) ~= "number" or type(free) ~= "number" or free < size then return nil, "insufficient space" end
     local backup = fs.fingerprint(request.backup_path)
     if backup and backup ~= request.source_fingerprint then return nil, "backup conflict" end
-    if not backup and not fs.copy(request.source_path, request.backup_path) then return nil, "backup failed" end
+    if not backup then
+        if not self:_journal(request,"backing_up") then return nil,"journal failed" end
+        if not fs.copy(request.source_path,request.backup_path) then return nil,"backup failed" end
+    end
     if fs.fingerprint(request.backup_path) ~= request.source_fingerprint then return nil, "backup validation failed" end
     if not self:_journal(request, "prepared") then return nil, "journal failed" end
     if not self:_check(request) or fs.fingerprint(request.source_path) ~= request.source_fingerprint or

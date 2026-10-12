@@ -5,7 +5,8 @@ function Widget:new(options) return options end
 package.preload["socket"] = function() return { gettime = function() return 1 end } end
 package.preload["ui/widget/confirmbox"] = function() return Widget end
 package.preload["ui/widget/infomessage"] = function() return Widget end
-package.preload["apps/reader/readerui"] = function() return {} end
+local reader_called=false
+package.preload["apps/reader/readerui"] = function() return {showReader=function() reader_called=true end} end
 package.preload["ui/uimanager"] = function()
     return {
         show = function(_, w) shown[#shown + 1] = w end,
@@ -39,4 +40,12 @@ downloaded = false
 downloader:download{ vol_name = "New name" }
 assert(#scheduled == 0 and recorded == 0 and transfers == 0,
     "conflicting paths must be rejected before scheduling or changing records")
+local guarded=Downloader:new{storage=storage,library={},api={},preprocess={isLocked=function() return true end}}
+assert(guarded:open("/books/Old name.epub")==nil,"reading a file locked by preprocessing must be refused")
+assert(not reader_called,"a processing lock must prevent opening the real reader")
+assert(shown[#shown].text:find("处理",1,true),"blocked reading needs an explicit message")
+storage.resolveDownloadPath=function() return "/books/New name.epub" end
+local blocked=Downloader:new{storage=storage,library={},api={},coordinator={acquire=function() return nil end}}
+blocked:download{vol_name="New name"}
+assert(#scheduled==0 and recorded==0,"preprocessing resource contention must not change download state")
 print("downloader path spec: OK")
