@@ -49,6 +49,11 @@ jobs:
             lua5.1 "${spec_file}"
           done
 
+      - name: Build and test host preprocessing prototype
+        run: |
+          make -C native/preprocess
+          python3 spec/native_preprocess_spec.py
+
       - name: Build a test release package
         shell: bash
         run: |

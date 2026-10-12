@@ -25,6 +25,8 @@ git diff --check
 
 20 组 Lua specs、Lua 5.1 语法、6 项 native 单元测试及包验证均通过。host 构建成功；未改动的 KissFFT 上游代码有一处 signedness 编译警告，未宣称编译零警告。CI 新增 host 构建与测试步骤；GitHub 工作流结果另行确认。
 
+上游 vendor 按字节保留，包括原有行尾空白；完整 `git diff --cached --check` 会报告这些上游空白。自有改动以 `git diff --cached --check -- . ':(exclude)native/preprocess/vendor/**'` 验证通过，导入文件另外用 `cmp`/`diff -rq` 对固定来源逐字节核对，不为消除空白报告修改第三方源码。
+
 测试包仅用于包结构回归，沿用上游版本号和说明，不是 Next 发布；没有创建 GitHub Release。native host `.so` 被忽略且不进入插件包。
 
 ## 尚未完成
