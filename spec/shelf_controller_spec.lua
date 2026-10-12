@@ -4,8 +4,9 @@ for _, name in ipairs({"buttondialog","infomessage","menu","multiinputdialog"}) 
     package.preload["ui/widget/"..name] = widget
 end
 package.preload["socket"] = function() return {gettime=os.time} end
-local shown
-package.preload["ui/uimanager"] = function() return {show=function(_,widget) shown=widget end,close=function() end} end
+local shown,callbacks=nil,{}
+package.preload["ui/uimanager"] = function() return {show=function(_,widget) shown=widget end,close=function() end,
+    scheduleIn=function(_,delay,callback) callbacks[#callbacks+1]=callback end} end
 package.preload["koobone.ui.book_detail"] = function() return {show=function() end} end
 local current
 package.preload["koobone.ui.bookshelf_grid"] = function()
@@ -41,4 +42,17 @@ assert(current.books[1]._series.title=="Z")
 shelf:showSort()
 shown.buttons[2][1].callback()
 assert(current.books[1]._series.title=="A", "actual title-sort command must update the root series view")
+local ui={series_style="collage"}
+shelf.settings.ui=function() return ui end
+local fetched={}
+shelf.cover_cache={url=function() return "fixture" end,fetch=function(_,item) fetched[#fetched+1]=item;return "cached" end}
+shelf.grid_view.refreshCovers=function() end
+local members={}
+for index=1,9 do members[index]={file_md5=tostring(index)} end
+shelf:_prefetchCovers({{_series={books=members}}})
+for _=1,20 do if #callbacks==0 then break end;table.remove(callbacks,1)() end
+assert(#fetched==4 and fetched[1]==members[1] and fetched[4]==members[4],"collage must fetch four visible members, not an unbounded series")
+ui.series_style="text";fetched={}
+shelf:_prefetchCovers({{_series={books=members}}})
+assert(#callbacks==0,"text style must not schedule artwork downloads")
 print("shelf controller spec: OK")

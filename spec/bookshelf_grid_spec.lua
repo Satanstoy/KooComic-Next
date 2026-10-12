@@ -65,7 +65,7 @@ package.preload["device"] = function()
     }
 end
 package.preload["ui/font"] = function()
-    return { getFace = function() return {} end }
+    return { getFace = function(_,name,size) return {name=name,size=size} end }
 end
 package.preload["ui/geometry"] = function()
     return {
@@ -168,6 +168,14 @@ assert(find(view,function(widget) return widget.text=="\195\151\226\128\13819" e
     "the production series must use imported CountBadge glyph spacing")
 assert(find(view,function(widget) return widget.text=="Original series/" and widget.alpha==true and widget.alignment=="left" end),
     "the production series must use imported FolderCard labels")
+assert(find(view,function(widget) return widget.text=="\239\129\160" and widget.face.name=="symbols" end),
+    "navigation must use a compact symbols-font back arrow, not the giant folded-up icon")
+view:update{ui={series_style="ribbon"}}
+assert(find(view,function(widget) return widget.text=="Original series/" and widget.alignment=="center" and widget.alpha==true end),
+    "ribbon selection must change the actual series renderer")
+view:update{ui={series_style="text"}}
+local text_title=find(view,function(widget) return widget.text=="Original series/" end)
+assert(text_title and text_title.height<=80,"text-only title must use a compact centered area away from corner badges")
 view:onBack()
 assert(view.closed == true)
 

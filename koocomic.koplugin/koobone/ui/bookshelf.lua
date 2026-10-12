@@ -108,7 +108,18 @@ function Bookshelf:_prefetchCovers(items)
     self.cover_generation = self.cover_generation + 1
     local generation = self.cover_generation
     local pending = {}
-    for _, item in ipairs(items) do
+    local candidates,seen={},{}
+    local style=self.settings:ui().series_style
+    for _,item in ipairs(items) do
+        if not (item._series and style=="text") then
+            local members=(item._series and style=="collage") and item._series.books or {item}
+            for index=1,math.min(4,#members) do
+                local member=members[index]
+                if not seen[member] then candidates[#candidates+1]=member;seen[member]=true end
+            end
+        end
+    end
+    for _, item in ipairs(candidates) do
         if not item._koobone_cover_path and self.cover_cache:url(item) then
             pending[#pending + 1] = item
         end

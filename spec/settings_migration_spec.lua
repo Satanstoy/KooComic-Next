@@ -42,6 +42,7 @@ assert(settings:account().password == "local-test-only")
 assert(settings:ui().portrait_columns == 3)
 assert(settings:ui().portrait_rows == 2)
 assert(settings:ui().text_size == "large")
+assert(settings:ui().series_style == "divider","old users must get the original divider style")
 assert(settings.data.schema_version == 3)
 assert(files["/settings/koobone.lua"].data.account.nick == "Reader")
 assert(files["/settings/koocomic.lua"].data.account.nick == "Reader")
@@ -59,5 +60,11 @@ files["/settings/existing.lua"] = {
 }
 local existing = Settings:new("/settings/existing.lua")
 assert(existing:update().auto_check_enabled == false)
+existing:ui().series_style="ribbon"
+existing:flush()
+assert(Settings:new("/settings/existing.lua"):ui().series_style=="ribbon","series style must survive restart")
+existing:ui().series_style="corrupt-style"
+existing:flush()
+assert(Settings:new("/settings/existing.lua"):ui().series_style=="divider","unknown styles must not reach a missing renderer")
 
 print("settings migration spec: OK")

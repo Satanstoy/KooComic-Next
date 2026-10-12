@@ -40,5 +40,18 @@ badge:paintTo(buffer,70,10)
 assert(badge:getSize().w>15 and badge:getSize().h>15)
 badge:free();folder:free();label:free();card:free();buffer:free()
 for name in pairs(package.loaded) do assert(not name:match("^lib/bookshelf_"),"Bookshelf runtime leaked") end
+local Grid=require("koobone.ui.bookshelf_grid")
+local members={{vol_name="One"},{vol_name="Two"},{vol_name="Three"},{vol_name="Four"}}
+for _,style in ipairs({"divider","ribbon","stack","collage","text","none"}) do
+    local shelf=Grid.show{books={{vol_name="Series",_series={books=members,volume_count=4,downloaded_count=1}}},
+        mode="series",ui={series_style=style,text_size="normal"},storage={isDownloaded=function() return false end,partSize=function() return 0 end}}
+    local canvas=BB.new(600,800,BB.TYPE_BBRGB32)
+    canvas:fill(BB.COLOR_WHITE)
+    shelf:paintTo(canvas,0,0)
+    local ink=0
+    for y=80,650,10 do for x=10,590,10 do if canvas:getPixel(x,y):getColor8().a<240 then ink=ink+1 end end end
+    assert(ink>10,"style did not render visible content: "..style)
+    shelf:_close();canvas:free()
+end
 Device:exit()
 print("KOReader imported Bookshelf component integration: OK")

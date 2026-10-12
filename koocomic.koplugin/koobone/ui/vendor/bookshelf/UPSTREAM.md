@@ -11,4 +11,7 @@
 
 v0.4 的生产网格已改用完整 `folder_card.lua`，旧 `folder_polygon.lua` 仅保留历史实现，不再参与正式卡片。原生颜色、灰阶/夜间与双插件整体体验仍须按 NV-25 验收；本次不声称继承上游的全局夜间回调。
 
+- `stack_display.lua`：从固定 `lib/bookshelf_stack_display.lua` 提取六模式语义、外部标签规则、ribbonInset/ribbonWidget、pileLayers/pileStep/pileInset和collagePlacement。缎带保留字体测量、两行截断、底部间隔和外伸几何；字体/颜色显式注入，不去除系列名末尾`/`。不引入上游设置、仓库、壁纸、全局夜间解析器或collageBB；KooComic用各自拥有的ImageWidget构成稳定四分格，缺图使用占位背景，未实现上游基于图像调色板的填充。叠放采用上游数量/方向/间距，背景层用KOReader FrameContainer适配，不宣称原样复用其主题混色算法。
+- `../bookshelf_icons.lua`：参考 `bookshelf_chip_bar.lua:_iconFace` 与 `bookshelf_widget.lua` 的搜索/返回glyph，统一使用KOReader已自带的`symbols`字体，不复制字体文件。菜单与翻页采用同字体的FontAwesome glyph，而非上游手绘菜单条；这是显式的紧凑图标适配，避免旧IconWidget默认尺寸撑满触控区域。
+
 全部模块使用 KooComic 独立命名空间；上层使用自己的目录 DTO，不向上游全局 `lib/*` 模块写入兼容别名。功能仅来自有署名的源码适配，不以此声明完整 Bookshelf 的 UI/运行时被复制。

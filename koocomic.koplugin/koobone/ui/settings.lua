@@ -2,6 +2,8 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
+local Menu = require("ui/widget/menu")
+local StackDisplay = require("koobone.ui.vendor.bookshelf.stack_display")
 
 local SettingsUI = {}
 
@@ -78,6 +80,26 @@ function SettingsUI.show(options)
                 {
                     text = "界面文字：" .. text_size_label,
                     callback = function() cycle("text_size", { "normal", "large", "extra_large" }) end,
+                },
+            },
+            {
+                {
+                    text="系列样式："..StackDisplay.labelFor(ui.series_style),
+                    callback=function()
+                        local picker,items
+                        items={}
+                        for _,style in ipairs(StackDisplay.OPTIONS) do
+                            local value=style.value
+                            items[#items+1]={text=style.label,checked=StackDisplay.resolve(ui.series_style)==value,
+                                callback=function()
+                                    ui.series_style=value
+                                    UIManager:close(picker)
+                                    applyUiChange()
+                                end}
+                        end
+                        picker=Menu:new{title="系列样式",item_table=items,is_borderless=true,title_bar_fm_style=true}
+                        UIManager:show(picker)
+                    end,
                 },
             },
             {

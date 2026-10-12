@@ -38,6 +38,7 @@ local function defaults()
             landscape_columns = 4,
             landscape_rows = 2,
             text_size = "large",
+            series_style = "divider",
         },
     }
 end
@@ -94,6 +95,8 @@ function Settings:load()
         data.account.password = nil
     end
     data.schema_version = 3
+    local styles={divider=true,ribbon=true,stack=true,collage=true,text=true,none=true}
+    if not styles[data.ui.series_style] then data.ui.series_style="divider" end
     self.data = data
     self:flush()
 end

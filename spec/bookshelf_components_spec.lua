@@ -18,7 +18,7 @@ local function class()
     return object
 end
 local Widget=class()
-for _,name in ipairs({"ui/widget/container/framecontainer","ui/widget/widget","ui/widget/textwidget","ui/widget/textboxwidget"}) do
+for _,name in ipairs({"ui/widget/container/framecontainer","ui/widget/container/centercontainer","ui/widget/widget","ui/widget/textwidget","ui/widget/textboxwidget"}) do
     package.preload[name]=function() return Widget end
 end
 package.preload["ui/geometry"]=function() return {new=function(_,value) return value end} end
@@ -49,4 +49,14 @@ assert(label[1].height<=40 and floor>0 and floor<250)
 local _,long=Folder.build{width=180,height=250,label=string.rep("Long series ",30),theme=theme,face=face}
 assert(long[1].height==40 and long[1].height_overflow_show_ellipsis==true)
 for name in pairs(package.loaded) do assert(not name:match("^lib/bookshelf_"),"upstream singleton leaked: "..name) end
+local styles_ok,Styles=pcall(require,"koobone.ui.vendor.bookshelf.stack_display")
+assert(styles_ok,"Bookshelf's six group styles must be available without upstream settings")
+assert(#Styles.OPTIONS==6 and Styles.resolve("invalid")=="divider")
+assert(Styles.needsExternalLabel("stack") and Styles.needsExternalLabel("collage") and Styles.needsExternalLabel("none"))
+assert(not Styles.needsExternalLabel("ribbon") and not Styles.needsExternalLabel("text"))
+assert(Styles.pileLayers(1)==0 and Styles.pileLayers(2)==1 and Styles.pileLayers(40)==3)
+assert(Styles.pileInset("stack",4)==Styles.pileStep()*3)
+assert(Styles.collagePlacement(2)[2]==4,"two-cover collage must use diagonal quarters")
+local band,band_y=Styles.ribbonWidget(160,230,"Original series/",{theme={ribbon_bg=0,ribbon_fg=255},face=face})
+assert(band.width>160 and band_y>0 and band_y+band.height<230)
 print("Bookshelf imported components spec: OK")
