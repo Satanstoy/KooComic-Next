@@ -159,6 +159,9 @@ package.preload["luasettings"] = function()
     }
     return { open = function() return handle end }
 end
+package.preload["koobone.settings_store"]=function() return {new=function() return {
+    load=function() return nil end,save=function() return true end,
+} end} end
 
 G_reader_settings = {
     readSetting = function() return "/tmp" end,
