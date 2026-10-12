@@ -21,7 +21,9 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local Metrics = require("koobone.ui.metrics")
 local Layout = require("koobone.ui.shelf_layout")
 local Space = require("koobone.ui.vendor.bookshelf.space")
-local FolderPolygon = require("koobone.ui.vendor.bookshelf.folder_polygon")
+local FolderCard = require("koobone.ui.vendor.bookshelf.folder_card")
+local CountBadge = require("koobone.ui.vendor.bookshelf.count_badge")
+local CoverCard = require("koobone.ui.vendor.bookshelf.cover_card")
 
 local Screen = Device.screen
 local WHITE = Blitbuffer.COLOR_WHITE
@@ -244,11 +246,7 @@ local function coverImage(path, width, height)
         if image and image.free then pcall(image.free, image) end
         return nil
     end
-    return fixedFrame(width, height, {
-        bordersize = dp(1),
-        background = WHITE,
-        color = DARK_GRAY,
-    }, image)
+    return CenterContainer:new{dimen=Geom:new{w=width,h=height},image}
 end
 
 local function itemTitle(item)
@@ -286,40 +284,49 @@ end
 local function bookCard(item, width, height, storage, callback)
     local title_h = dp(40)
     local gap = dp(2)
-    local cover_w = width - Space.px(4)
-    local cover_h = math.min(math.floor(cover_w / 0.70), height-title_h-gap)
+    local shadow = Space.px(4)
+    local cover_w = width - shadow
+    local slot_h = math.min(math.floor(cover_w / 0.70)+shadow, height-title_h-gap)
+    local cover_h = slot_h-shadow
+    local border = Screen:scaleBySize(1)
+    local inner_w,inner_h = cover_w-2*border,cover_h-2*border
     local title = itemTitle(item)
-    local cover = coverImage(item._koobone_cover_path, cover_w, cover_h)
+    local cover = coverImage(item._koobone_cover_path, inner_w, inner_h)
         or PlaceholderCover:new{
-            width = cover_w,
-            height = cover_h,
+            width = inner_w,
+            height = inner_h,
             title = title,
             volume = itemVolume(item),
         }
     local cover_layers = OverlapGroup:new{
-        dimen = Geom:new{ w = cover_w, h = cover_h },
+        dimen = Geom:new{ w = width, h = slot_h },
         allow_mirroring = false,
-        cover,
+        FrameContainer:new{bordersize=0,padding=0,padding_top=shadow,padding_left=shadow,
+            CoverCard.ShadowRect:new{width=cover_w,height=cover_h,radius=shadow,color=Blitbuffer.COLOR_GRAY}},
+        CoverCard.RoundedCornerCard:new{width=cover_w,height=cover_h,radius=Space.px(4),
+            border_size=border,border_color=BLACK,inner=cover,shadow_color=Blitbuffer.COLOR_GRAY,
+            shadow_offset_x=shadow,shadow_offset_y=shadow,shadow_radius=shadow},
     }
     local downloaded = storage:isDownloaded(item)
     local partial = storage:partSize(item)
     local badge_text
-    if item._series then
-        badge_text = "×" .. tostring(item._series.volume_count)
-    elseif downloaded then
+    if not item._series and downloaded then
         badge_text = "已下载"
-    elseif partial > 0 then
+    elseif not item._series and partial > 0 then
         badge_text = "未完成"
     end
     if item._series then
-        local label_h = dp(42)
-        local tab_h = dp(10)
-        local folder_y = cover_h-label_h-tab_h
-        cover_layers[#cover_layers+1] = OffsetContainer:new{x_off=0,y_off=folder_y,
-            FolderPolygon:new{width=cover_w,height=label_h+tab_h,tab_w=math.floor(cover_w*0.4),
-                tab_h=tab_h,fill_color=LIGHT_GRAY,edge_color=BLACK,border=dp(1),radius=Space.px(4)}}
-        cover_layers[#cover_layers+1] = OffsetContainer:new{x_off=dp(4),y_off=folder_y+tab_h+dp(2),
-            textBox(title,cover_w-dp(8),label_h-dp(4),14,{bold=true,bgcolor=LIGHT_GRAY})}
+        local theme={folder_bg=Blitbuffer.gray(0.20),folder_fg=BLACK,border=BLACK,badge_bg=WHITE,badge_fg=BLACK}
+        if Screen.isColorEnabled and Screen:isColorEnabled() then
+            theme.folder_bg=Blitbuffer.colorFromString("#e7c9a9")
+        end
+        local folder,label=FolderCard.build{width=width,height=slot_h,label=title,
+            shadow_reserve=shadow,theme=theme,face=face("infofont",16)}
+        cover_layers[#cover_layers+1]=folder
+        cover_layers[#cover_layers+1]=label
+        local count=CountBadge.render(item._series.volume_count,{theme=theme,face=face("smallinfofont",12)})
+        if count then cover_layers[#cover_layers+1]=OffsetContainer:new{
+            x_off=math.max(0,cover_w-count:getSize().w),y_off=0,count} end
         if item._series.downloaded_count > 0 then
             cover_layers[#cover_layers+1] = OffsetContainer:new{x_off=dp(4),y_off=dp(4),
                 badge("↓"..tostring(item._series.downloaded_count),dp(38),dp(24))}

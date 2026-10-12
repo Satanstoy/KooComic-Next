@@ -48,8 +48,11 @@ package.preload["ffi/blitbuffer"] = function()
         COLOR_DARK_GRAY = 64,
         COLOR_GRAY = 128,
         COLOR_GRAY_E = 224,
+        gray = function(value) return math.floor((1-value)*255) end,
     }
 end
+package.preload["ffi"] = function() return {typeof=function() return "RGB32" end,istype=function() return false end} end
+package.preload["ui/size"] = function() return {border={thin=1}} end
 package.preload["device"] = function()
     return {
         hasKeys = function() return false end,
@@ -150,6 +153,21 @@ assert(view.layout.footer.y + view.layout.footer.h == 1200)
 assert(view.layout.footer.h <= 48, "pagination and commands must share a single footer")
 assert(view.chrome.tabs[1].label == "系列" and view.chrome.tabs[2].label == "单卷")
 assert(view.chrome.tabs[3].label == "已下载")
+local series={vol_name="Original series/",_series={volume_count=19,downloaded_count=3}}
+view:update{books={series},mode="series"}
+local function find(widget,predicate,seen)
+    if type(widget)~="table" then return end
+    seen=seen or {};if seen[widget] then return end;seen[widget]=true
+    if predicate(widget) then return widget end
+    for _,child in pairs(widget) do
+        local found=find(child,predicate,seen)
+        if found then return found end
+    end
+end
+assert(find(view,function(widget) return widget.text=="\195\151\226\128\13819" end),
+    "the production series must use imported CountBadge glyph spacing")
+assert(find(view,function(widget) return widget.text=="Original series/" and widget.alpha==true and widget.alignment=="left" end),
+    "the production series must use imported FolderCard labels")
 view:onBack()
 assert(view.closed == true)
 
