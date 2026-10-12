@@ -116,7 +116,7 @@ end
 assert(finished and files:hash(source)==fingerprint,"real original restoration must be byte-identical")
 local storage={downloadDir=function() return directory end,isSafeLocalPath=function(_,path) return files:isSafe(path) end,
     resolveLocalPath=function() return source end,itemKey=function() return "service-book" end}
-local service=Service:new{storage=storage,directory=directory.."/service-"..tonumber(ffi.C.getpid()),native_library=root.."/native/preprocess/build/moire-host.so",
+local service=Service:new{storage=storage,retain_original=true,directory=directory.."/service-"..tonumber(ffi.C.getpid()),native_library=root.."/native/preprocess/build/moire-host.so",
     is_in_use=function() return false end,schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
 assert(service.available,service.reason)
 assert(service:submit({}) and #service:jobs()==1 and not service:isActive())
@@ -167,7 +167,7 @@ local damaged=assert(service.files:readJSON(service.state_path))
 local last=damaged.queue.jobs[#damaged.queue.jobs]
 last.state,last.output_fingerprint="validating",nil
 assert(service.files:writeJSON(service.state_path,damaged))
-local recovered=Service:new{storage=storage,directory=service.directory,native_library=root.."/native/preprocess/build/moire-host.so",
+local recovered=Service:new{storage=storage,retain_original=true,directory=service.directory,native_library=root.."/native/preprocess/build/moire-host.so",
     is_in_use=function() return false end,schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
 assert(recovered.available,recovered.reason)
 for _=1,200 do
@@ -247,6 +247,39 @@ for _=1,100 do
 end
 assert(files:hash(dead_source)==fingerprint,"late hashes must not commit after the worker exits")
 assert(not files:exists(dead_paths.permission),"late hashes must not authorize a retry worker")
+local direct_source=directory.."/direct.epub"
+assert(files:copy(worker_result.backup_path,direct_source))
+local direct_storage={downloadDir=function() return directory end,isSafeLocalPath=function(_,path) return files:isSafe(path) end,
+    resolveLocalPath=function() return direct_source end,itemKey=function() return "direct-book" end}
+local function directService()
+    return Service:new{storage=direct_storage,directory=directory.."/direct-service",
+        native_library=root.."/native/preprocess/build/moire-host.so",is_in_use=function() return false end,
+        schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
+end
+local direct=directService()
+assert(direct.available and direct:submit({}) and direct:resume())
+for _=1,300 do
+    if direct.queue.jobs[1] and direct.queue.jobs[1].state=="completed" then break end
+    local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+    ffi.C.usleep(10000)
+end
+direct:pause()
+local direct_job=assert(direct.queue.jobs[1])
+assert(direct_job.state=="completed" and direct_job.profile.discard_original==true)
+assert(files:hash(direct_source)~=fingerprint and not direct.files:exists(direct.worker:paths(direct_job).backup),
+    "default service must replace the source without creating an original backup")
+assert(not direct:restore({}),"direct replacement must not advertise a recoverable original")
+local direct_snapshot=assert(direct.files:readJSON(direct.state_path))
+direct_snapshot.queue.jobs[1].state="validating";direct_snapshot.queue.jobs[1].output_fingerprint=nil
+assert(direct.files:writeJSON(direct.state_path,direct_snapshot))
+direct=directService();assert(direct.available)
+for _=1,200 do
+    if not direct.reconciling then break end
+    local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+    ffi.C.usleep(10000)
+end
+assert(direct.queue.jobs[1].state=="completed" and direct:record(direct_source),
+    "direct replacement must recover a committed output without a backup")
 local Storage=require("koobone.storage")
 local records={}
 local real_storage=Storage:new{download=function() return {directory=directory,records=records} end,flush=function() end}

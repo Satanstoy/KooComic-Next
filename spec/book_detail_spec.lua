@@ -45,6 +45,12 @@ end end
 assert(optimize,"downloaded comics need a real preprocessing action in details")
 optimize.callback()
 assert(submitted==0,"processing must wait for user confirmation")
+assert(shown[#shown].text:find("不保留原版备份",1,true),"processing confirmation must disclose irreversible replacement")
 shown[#shown].ok_callback()
 assert(submitted==1)
+dialog=BookDetail.show{item={vol_name="Optimized"},storage=storage,downloader=downloader,
+    preprocess={available=true,record=function() return {} end,isLocked=function() return false end}}
+for _,row in ipairs(dialog.buttons) do for _,button in ipairs(row) do
+    assert(button.text~="恢复原版","no-backup UI must not offer original restoration")
+end end
 print("book detail spec: OK")

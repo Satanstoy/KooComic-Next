@@ -69,7 +69,7 @@ function Worker:start(job,events)
             local backend=Backend:new{native_library=self.native_library,workspace=paths.workspace,
                 memory_budget=self.memory_budget,files=self.files}
             local request={source_path=job.source_path,temporary_path=paths.temporary,backup_path=paths.backup,
-                source_fingerprint=job.source_fingerprint}
+                source_fingerprint=job.source_fingerprint,discard_original=job.profile.discard_original==true}
             local validated_fingerprint
             local transaction_fs=self.files:transactionFS()
             transaction_fs.rename=function(source,target)

@@ -27,7 +27,7 @@ end
 function Transaction:_journal(request, state)
     return self.journal{ state = state, source_path = request.source_path, backup_path = request.backup_path,
         temporary_path = request.temporary_path, source_fingerprint = request.source_fingerprint,
-        output_fingerprint = request.output_fingerprint }
+        output_fingerprint = request.output_fingerprint,discard_original=request.discard_original==true }
 end
 
 function Transaction:commit(request)
@@ -38,15 +38,17 @@ function Transaction:commit(request)
     if type(request.output_fingerprint) ~= "string" or request.output_fingerprint == "" or
             fs.fingerprint(request.temporary_path) ~= request.output_fingerprint or
             not self.validate(request.temporary_path) then return nil, "output validation failed" end
-    local size, free = fs.size(request.source_path), fs.free_space(request.source_path)
-    if type(size) ~= "number" or type(free) ~= "number" or free < size then return nil, "insufficient space" end
-    local backup = fs.fingerprint(request.backup_path)
-    if backup and backup ~= request.source_fingerprint then return nil, "backup conflict" end
-    if not backup then
-        if not self:_journal(request,"backing_up") then return nil,"journal failed" end
-        if not fs.copy(request.source_path,request.backup_path) then return nil,"backup failed" end
+    if not request.discard_original then
+        local size, free = fs.size(request.source_path), fs.free_space(request.source_path)
+        if type(size) ~= "number" or type(free) ~= "number" or free < size then return nil, "insufficient space" end
+        local backup = fs.fingerprint(request.backup_path)
+        if backup and backup ~= request.source_fingerprint then return nil, "backup conflict" end
+        if not backup then
+            if not self:_journal(request,"backing_up") then return nil,"journal failed" end
+            if not fs.copy(request.source_path,request.backup_path) then return nil,"backup failed" end
+        end
+        if fs.fingerprint(request.backup_path) ~= request.source_fingerprint then return nil, "backup validation failed" end
     end
-    if fs.fingerprint(request.backup_path) ~= request.source_fingerprint then return nil, "backup validation failed" end
     if not self:_journal(request, "prepared") then return nil, "journal failed" end
     if not self:_check(request) or fs.fingerprint(request.source_path) ~= request.source_fingerprint or
             fs.fingerprint(request.temporary_path) ~= request.output_fingerprint then

@@ -64,4 +64,22 @@ end
 assert(transaction:restore(request) == nil, "changed restore temporary file must not replace the reading file")
 assert(files[request.source_path] == "optimized")
 transaction.journal = original_journal
+files[request.source_path],files[request.temporary_path],files[request.backup_path]="original","optimized",nil
+request.discard_original=true
+fail_copy=true
+assert(transaction:commit(request),"direct replacement must not require an original-copy backup")
+assert(files[request.source_path]=="optimized" and not files[request.backup_path],
+    "successful direct replacement must leave no original backup")
+assert(logs[#logs].discard_original==true,"recovery journal must record direct-replacement policy")
+for _,boundary in ipairs({"validation","reading","rename","prepared_journal"}) do
+    files[request.source_path],files[request.temporary_path]="original","optimized"
+    valid=boundary~="validation";opened=boundary=="reading";fail_rename=boundary=="rename"
+    transaction.journal=function(record) return not (boundary=="prepared_journal" and record.state=="prepared") end
+    assert(not transaction:commit(request) and files[request.source_path]=="original" and not files[request.backup_path],
+        "direct replacement must preserve original on "..boundary.." failure")
+end
+valid,opened,fail_rename=true,false,false
+transaction.journal=function(record) return record.state~="committed" end
+assert(not transaction:commit(request) and files[request.source_path]=="optimized" and not files[request.backup_path],
+    "a post-rename journal failure must retain the validated readable output for recovery")
 print("preprocess transaction spec: OK")

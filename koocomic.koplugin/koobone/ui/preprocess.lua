@@ -27,19 +27,18 @@ function PreprocessUI.show(storage,service)
                 items[#items+1]={text=info.title,mandatory=service:record(info.path) and "已优化" or "未处理",
                     callback=function()
                         local dialog
-                        local function action(restore)
+                        local function action()
                             UIManager:close(dialog)
-                            UIManager:show(ConfirmBox:new{text=(restore and "恢复原版？" or "处理这本本地漫画的彩纹？").."\n\n"..info.title,
-                                ok_text=restore and "恢复原版" or "开始处理",ok_callback=function()
+                            UIManager:show(ConfirmBox:new{text="处理这本本地漫画的彩纹？成功后直接覆盖原 EPUB，不保留原版备份，不能撤销。\n\n"..info.title,
+                                ok_text="开始处理",ok_callback=function()
                                     local ok,err
-                                    if restore then ok,err=service:restore(item) else ok,err=service:submit(item) end
+                                    ok,err=service:submit(item)
                                     report(ok,err)
                                     if ok then report(service:resume()) end
                                 end})
                         end
                         dialog=ButtonDialog:new{title=info.title,buttons={
-                            {{text="去彩纹处理",callback=function() action(false) end}},
-                            {{text="恢复原版",enabled=service:record(info.path)~=nil,callback=function() action(true) end}},
+                            {{text="去彩纹处理",callback=action}},
                             {{text="关闭",callback=function() UIManager:close(dialog) end}},
                         }}
                         UIManager:show(dialog)

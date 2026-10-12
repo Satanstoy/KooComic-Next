@@ -16,7 +16,8 @@ end
 
 function Service:new(options)
     local self=setmetatable({storage=options.storage,directory=options.directory,requests={},next_id=1,
-        available=false,running=false,coordinator=options.coordinator or Coordinator:new()},Service)
+        available=false,running=false,retain_original=options.retain_original==true,
+        coordinator=options.coordinator or Coordinator:new()},Service)
     local loaded,err=pcall(function()
         local ffi=require("ffi")
         local Files=require("koobone.preprocess_files")
@@ -158,7 +159,7 @@ function Service:restore(item)
     if self.reconciling then return nil,"正在核对文件事务，请稍后重试" end
     local path=self.storage:resolveLocalPath(item)
     local original=path and self:record(path)
-    if not original or self.is_in_use(path) or self:isLocked(path) then return nil,"原版备份不可用或文件正在使用" end
+    if not original or original.profile.discard_original or self.is_in_use(path) or self:isLocked(path) then return nil,"原版备份不可用或文件正在使用" end
     local request={book_id=original.book_id,source_path=path,
         source_fingerprint=original.source_fingerprint,algorithm_version="restore-1",
         profile={restore=true,output_fingerprint=original.output_fingerprint}}
@@ -220,11 +221,12 @@ function Service:_hash(request,token)
             local record=self:record(request.source_path)
             local job,err
             if record and record.output_fingerprint==fingerprint then
-                err="已优化，请先恢复原版后重新处理"
+                err="已优化，不重复处理；如需重新处理，请重新下载原文件"
             else
                 for _, previous in ipairs(self.queue.jobs) do
                     if previous.book_id==request.book_id and previous.source_path==request.source_path and
-                            previous.source_fingerprint==fingerprint and previous.algorithm_version=="kissfft-f2892a2-v1" then
+                            previous.source_fingerprint==fingerprint and previous.algorithm_version=="kissfft-f2892a2-v1" and
+                            previous.profile.discard_original==(not self.retain_original) then
                         local retried,retry_error=self.queue:retry(previous.id,previous.state=="completed")
                         if retried then job=previous else err=retry_error end
                         break
@@ -232,7 +234,8 @@ function Service:_hash(request,token)
                 end
                 if not job and not err then
                     job,err=self.queue:add{book_id=request.book_id,source_path=request.source_path,
-                        source_fingerprint=fingerprint,algorithm_version="kissfft-f2892a2-v1",profile={strength=0.8}}
+                        source_fingerprint=fingerprint,algorithm_version="kissfft-f2892a2-v1",
+                        profile={strength=0.8,discard_original=not self.retain_original}}
                 end
             end
             if job then
@@ -320,7 +323,8 @@ function Service:reconcile()
             local expected=job.profile.restore and job.source_fingerprint or journal.output_fingerprint
             self.files:hashAsync(job.source_path,self.schedule,nil,function(current)
                 self.files:hashAsync(paths.backup,self.schedule,nil,function(backup)
-                    if current==expected and backup==job.source_fingerprint then
+                    if current==expected and ((job.profile.discard_original==true and journal.discard_original==true) or
+                            backup==job.source_fingerprint) then
                         job.state,job.output_fingerprint,job.error="completed",expected,nil
                     elseif current==job.source_fingerprint and claimed and not job.profile.restore then
                         self.files:remove(paths.temporary);self.files:remove(paths.workspace.."/page.codec")
