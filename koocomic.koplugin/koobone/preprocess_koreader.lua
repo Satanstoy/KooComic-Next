@@ -6,6 +6,7 @@ local Jpeg = require("ffi/jpeg")
 local Png = require("ffi/png")
 local Epub = require("koobone.preprocess_epub")
 local Files = require("koobone.preprocess_files")
+local Profile = require("koobone.preprocess_profile")
 local Backend = {}
 Backend.__index = Backend
 
@@ -65,14 +66,26 @@ end
 
 function Backend:_image(data,media,profile,validate_only)
     assert(self.files:isSafe(self.page_path) and not self.files:exists(self.page_path),"unsafe or existing codec temporary file")
-    local original,padded,cropped
+    local original,scaled,padded,cropped
     local ok,result=pcall(function()
         local width,height,padded_w,padded_h=self:_dimensions(data,media)
         original=self:_decode(data,media)
         assert(original:getWidth()==width and original:getHeight()==height,"image dimensions changed")
         if validate_only then return true end
+        local parameters,profile_error=Profile.normalize(profile)
+        assert(parameters,profile_error)
+        local target_width,target_height=Profile.dimensions(width,height,parameters)
+        assert(target_width,target_height)
+        local image=original
+        if target_width~=width or target_height~=height then
+            scaled=require("ffi/mupdf").scaleBlitBuffer(original,target_width,target_height)
+            assert(scaled,"image resampling failed")
+            image=scaled
+            width,height=target_width,target_height
+            padded_w,padded_h=width+width%2,height+height%2
+        end
         padded=BB.new(padded_w,padded_h,BB.TYPE_BBRGB32)
-        padded:blitFrom(original,0,0,0,0,width,height)
+        padded:blitFrom(image,0,0,0,0,width,height)
         local pointer=ffi.cast("unsigned char*",padded.data)
         if padded_w>width then
             for row=0,height-1 do
@@ -80,7 +93,7 @@ function Backend:_image(data,media,profile,validate_only)
             end
         end
         if padded_h>height then ffi.copy(pointer+height*padded.stride,pointer+(height-1)*padded.stride,padded.stride) end
-        local strength=profile and profile.strength or 0.8
+        local strength=parameters.strength
         assert(type(strength)=="number" and strength==strength and strength>=0 and strength<=1,"invalid filter strength")
         local status=self.native.koocomic_filter(pointer,padded_w,padded_h,padded.stride,1,strength,
             self.memory_budget,padded.stride*padded_h)
@@ -94,7 +107,7 @@ function Backend:_image(data,media,profile,validate_only)
         assert(encoded,err or "image encoding failed")
         return readFile(self.page_path)
     end)
-    for _, buffer in ipairs({original or false,padded or false,cropped or false}) do if buffer then buffer:free() end end
+    for _, buffer in ipairs({original or false,scaled or false,padded or false,cropped or false}) do if buffer then buffer:free() end end
     os.remove(self.page_path)
     if not ok then error(result) end
     return result

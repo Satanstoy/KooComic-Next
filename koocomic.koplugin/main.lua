@@ -49,6 +49,7 @@ function KooComic:init()
     self.library = Library:new(self.api, self.storage,{store=CatalogStore:new{
         directory=DataStorage:getSettingsDir().."/koocomic-catalog"},account=function() return self.settings:account().uin end})
     self.preprocess = PreprocessService:get{storage=self.storage,
+        profile_provider=function() return self.settings.data.preprocess end,
         directory=DataStorage:getSettingsDir().."/koocomic-preprocess"}
     self.storage.preprocess = self.preprocess
     self.download_service=DownloadService:new{settings=self.settings,api=self.api,library=self.library,storage=self.storage,

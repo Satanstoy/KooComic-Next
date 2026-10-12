@@ -2,13 +2,18 @@
 local Queue=require("koobone.preprocess_queue")
 local Coordinator=require("koobone.resource_coordinator")
 local Identity=require("koobone.preprocess_identity")
+local Profile=require("koobone.preprocess_profile")
 local Service={}
 Service.__index=Service
 local instances={}
 
 function Service:get(options)
     local existing=instances[options.directory]
-    if existing then existing.storage=options.storage;return existing end
+    if existing then
+        existing.storage=options.storage
+        if options.profile_provider then existing.profile_provider=options.profile_provider end
+        return existing
+    end
     local service=self:new(options)
     instances[options.directory]=service
     return service
@@ -16,6 +21,7 @@ end
 
 function Service:new(options)
     local self=setmetatable({storage=options.storage,directory=options.directory,requests={},next_id=1,
+        profile_provider=options.profile_provider or function() return {} end,
         available=false,running=false,retain_original=options.retain_original==true,
         coordinator=options.coordinator or Coordinator:new()},Service)
     local loaded,err=pcall(function()
@@ -56,7 +62,9 @@ function Service:new(options)
                 assert(request.state=="pending" or request.state=="preparing" or request.state=="failed" or request.state=="cancelled",
                     "任务状态无效")
                 local restored={id=request.id,book_id=request.book_id,source_path=request.source_path,
-                    state=request.state=="preparing" and "failed" or request.state}
+                    state=request.state=="preparing" and "failed" or request.state,
+                    profile=assert(Profile.normalize(request.profile))}
+                restored.profile.discard_original=not self.retain_original
                 self.requests[#self.requests+1]=restored
                 self.next_id=math.max(self.next_id,request.id+1)
             end
@@ -138,16 +146,27 @@ function Service:record(path)
     end
 end
 
+function Service:profile()
+    local called,value=pcall(self.profile_provider)
+    if not called then return nil,"处理参数不可用" end
+    local profile,err=Profile.normalize(value)
+    if not profile then return nil,err end
+    profile.discard_original=not self.retain_original
+    return profile
+end
+
 function Service:submit(item)
     if not self.available then return nil,self.reason end
     if self.reconciling then return nil,"正在核对文件事务，请稍后重试" end
+    local profile,profile_error=self:profile()
+    if not profile then return nil,profile_error end
     local path,err=self.storage:resolveLocalPath(item)
     if not path or not self.storage:isSafeLocalPath(path) then return nil,err or "本地文件不可用" end
     if self.is_in_use(path) or self:isLocked(path) then return nil,"请先关闭正在阅读或处理的漫画" end
     for _, request in ipairs(self.requests) do
         if request.source_path==path and (request.state=="pending" or request.state=="preparing") then return nil,"已排队" end
     end
-    local request={id=self.next_id,book_id=tostring(self.storage:itemKey(item)),source_path=path,state="pending"}
+    local request={id=self.next_id,book_id=tostring(self.storage:itemKey(item)),source_path=path,state="pending",profile=profile}
     self.next_id=self.next_id+1;self.requests[#self.requests+1]=request
     local saved,save_error=self:_save()
     if not saved then table.remove(self.requests);return nil,save_error end
@@ -226,7 +245,8 @@ function Service:_hash(request,token)
                 for _, previous in ipairs(self.queue.jobs) do
                     if previous.book_id==request.book_id and previous.source_path==request.source_path and
                             previous.source_fingerprint==fingerprint and previous.algorithm_version=="kissfft-f2892a2-v1" and
-                            previous.profile.discard_original==(not self.retain_original) then
+                            Identity.key{book_id=request.book_id,source_fingerprint=fingerprint,
+                                algorithm_version="kissfft-f2892a2-v1",profile=request.profile}==previous.id then
                         local retried,retry_error=self.queue:retry(previous.id,previous.state=="completed")
                         if retried then job=previous else err=retry_error end
                         break
@@ -235,7 +255,7 @@ function Service:_hash(request,token)
                 if not job and not err then
                     job,err=self.queue:add{book_id=request.book_id,source_path=request.source_path,
                         source_fingerprint=fingerprint,algorithm_version="kissfft-f2892a2-v1",
-                        profile={strength=0.8,discard_original=not self.retain_original}}
+                        profile=request.profile}
                 end
             end
             if job then

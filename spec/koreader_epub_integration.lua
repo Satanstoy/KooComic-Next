@@ -68,6 +68,12 @@ local odd_ok,odd_image=Png.decodeFromFile(directory.."/odd-result.png",4)
 assert(odd_ok and odd_image.width==63 and odd_image.height==65,"padding must not alter EPUB page dimensions")
 for index=0,63*65*4-1 do assert(math.abs(odd_image.data[index]-120)<=1) end
 ffi.C.free(odd_image.data)
+local scaled_result=backend:_image(page,"image/png",{strength=0.5,scale_mode="fit",target_width=32,target_height=24})
+assert(files:write(directory.."/scaled.png",scaled_result))
+local scaled_ok,scaled_image=Png.decodeFromFile(directory.."/scaled.png",4)
+assert(scaled_ok and scaled_image.width==24 and scaled_image.height==24,
+    "target profile must resample before filtering and encode the fitted dimensions")
+ffi.C.free(scaled_image.data)
 assert(files:hash(source)==fingerprint)
 assert(files:writeJSON(directory.."/snapshot.json",{schema_version=1,stage="pending"}))
 assert(files:readJSON(directory.."/snapshot.json").stage=="pending")
@@ -280,6 +286,39 @@ for _=1,200 do
 end
 assert(direct.queue.jobs[1].state=="completed" and direct:record(direct_source),
     "direct replacement must recover a committed output without a backup")
+local profiled_source=directory.."/profiled.epub"
+assert(files:copy(worker_result.backup_path,profiled_source))
+local controls={strength=0.4,scale_mode="fit",target_width=32,target_height=24}
+local profiled=Service:new{storage={downloadDir=function() return directory end,
+    isSafeLocalPath=function(_,path) return files:isSafe(path) end,resolveLocalPath=function() return profiled_source end,
+    itemKey=function() return "profiled-book" end},directory=directory.."/profiled-service",
+    native_library=root.."/native/preprocess/build/moire-host.so",is_in_use=function() return false end,
+    profile_provider=function() return controls end,schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
+assert(profiled.available and profiled:submit({}))
+controls.strength,controls.scale_mode=0.9,"original"
+assert(profiled.requests[1].profile.strength==0.4 and profiled:resume())
+for _=1,300 do
+    if profiled.queue.jobs[1] and profiled.queue.jobs[1].state=="completed" then break end
+    local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+    ffi.C.usleep(10000)
+end
+profiled:pause()
+assert(profiled.queue.jobs[1].state=="completed" and profiled.queue.jobs[1].profile.scale_mode=="fit",
+    "queued processing must use frozen parameters, not controls changed after enqueue")
+local scaled_reader=Archive.Reader:new();assert(scaled_reader:open(profiled_source));for _ in scaled_reader:iterate() do end
+local frozen_page=assert(scaled_reader:extractToMemory("OPS/page.png"));scaled_reader:close()
+assert(files:write(directory.."/frozen.png",frozen_page))
+local frozen_ok,frozen_image=Png.decodeFromFile(directory.."/frozen.png",4)
+assert(frozen_ok and frozen_image.width==24 and frozen_image.height==24);ffi.C.free(frozen_image.data)
+local invalid_directory=directory.."/invalid-profile";assert(files:mkdir(invalid_directory))
+assert(files:writeJSON(invalid_directory.."/tasks.json",{schema_version=1,requests={{id=1,book_id="invalid",
+    source_path=profiled_source,state="pending",profile=false}},queue={schema_version=1,paused=true,jobs={}}}))
+local before_invalid=files:hash(invalid_directory.."/tasks.json")
+local invalid_service=Service:new{storage=profiled.storage,directory=invalid_directory,
+    native_library=root.."/native/preprocess/build/moire-host.so",is_in_use=function() return false end,
+    schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
+assert(not invalid_service.available and files:hash(invalid_directory.."/tasks.json")==before_invalid,
+    "invalid false request profile must disable recovery without rewriting the snapshot")
 local Storage=require("koobone.storage")
 local records={}
 local real_storage=Storage:new{download=function() return {directory=directory,records=records} end,flush=function() end}

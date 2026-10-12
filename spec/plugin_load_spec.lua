@@ -175,6 +175,8 @@ local instance = Plugin:new{
 instance:init()
 assert(instance.download_service and instance.downloader.service==instance.download_service,
     "production main must bind the isolated queue instead of the legacy synchronous downloader")
+instance.settings.data.preprocess.strength=0.6
+assert(instance.preprocess:profile().strength==0.6,"production preprocessing must use persisted user controls")
 assert(instance.settings ~= nil)
 assert(instance.downloader ~= nil)
 assert(instance.updater ~= nil)

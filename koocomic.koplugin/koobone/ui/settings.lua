@@ -103,6 +103,12 @@ function SettingsUI.show(options)
                 },
             },
             {
+                {text="去彩纹参数",callback=function()
+                    UIManager:close(dialog)
+                    require("koobone.ui.preprocess_profile").show(settings)
+                end},
+            },
+            {
                 {
                     text = "检查更新",
                     callback = function()

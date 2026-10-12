@@ -26,4 +26,7 @@ assert(#picker.item_table==6,"all six styles must be individually selectable")
 assert(picker.item_table[1].checked==true)
 picker.item_table[2].callback()
 assert(ui.series_style=="ribbon" and flushes==1 and changes==1)
+local profile_button
+for _,row in ipairs(dialog.buttons) do for _,button in ipairs(row) do if button.text=="去彩纹参数" then profile_button=button end end end
+assert(profile_button,"settings must expose processing scale and strength controls")
 print("settings UI spec: OK")
