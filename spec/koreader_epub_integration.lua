@@ -319,6 +319,59 @@ local invalid_service=Service:new{storage=profiled.storage,directory=invalid_dir
     schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
 assert(not invalid_service.available and files:hash(invalid_directory.."/tasks.json")==before_invalid,
     "invalid false request profile must disable recovery without rewriting the snapshot")
+local batch_paths,batch_items={},{}
+for index=1,20 do
+    local id="batch-"..index
+    batch_paths[id]=directory.."/"..id..".epub"
+    assert(files:copy(worker_result.backup_path,batch_paths[id]))
+    batch_items[#batch_items+1]={file_md5=id,vol_name="Original batch "..index}
+end
+batch_paths.optimized=direct_source
+batch_paths.bad=directory.."/bad-batch.epub";assert(files:write(batch_paths.bad,"<html>invalid EPUB</html>"))
+batch_paths.occupied=directory.."/occupied-batch.epub";assert(files:copy(worker_result.backup_path,batch_paths.occupied))
+direct_storage.resolveLocalPath=function(_,item) return batch_paths[item.file_md5] end
+direct_storage.itemKey=function(_,item) return item.file_md5 end
+direct_storage.fileSize=function(_,path) return lfs.attributes(path,"size") end
+direct.is_in_use=function(path) return path==batch_paths.occupied end
+direct.space=function() return 128*1024*1024 end
+batch_items[#batch_items+1]={file_md5="optimized"}
+batch_items[#batch_items+1]={file_md5="bad"}
+batch_items[#batch_items+1]=batch_items[1]
+batch_items[#batch_items+1]={file_md5="occupied"}
+batch_items[#batch_items+1]={file_md5="missing"}
+local batch_summary,batch_notifications=nil,0
+direct.on_batch=function(value) batch_summary=value;batch_notifications=batch_notifications+1 end
+local added=assert(direct:submitBatch(batch_items))
+assert(added.added==22 and added.duplicate==1 and added.occupied==1 and added.invalid==1)
+assert(direct:resume())
+for _=1,3000 do
+    if batch_summary then break end
+    local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+    ffi.C.usleep(10000)
+end
+direct:pause()
+assert(batch_summary and batch_summary.completed==20 and batch_summary.optimized==1 and batch_summary.failed==1 and
+    batch_summary.skipped==3 and batch_notifications==1,"actual mixed preprocessing batch must continue after failure and summarize once")
+for index=1,20 do assert(files:hash(batch_paths["batch-"..index])~=fingerprint) end
+local batch_snapshot=assert(direct.files:readJSON(direct.state_path))
+batch_snapshot.requests={}
+while #batch_snapshot.batch.members>20 do table.remove(batch_snapshot.batch.members) end
+batch_snapshot.batch.finished=false
+assert(direct.files:writeJSON(direct.state_path,batch_snapshot))
+local batch_recovered=directService()
+assert(batch_recovered.available,batch_recovered.reason)
+assert(batch_recovered.next_id>20,"restart must reserve IDs of transferred requests retained in batch metadata")
+local function rejected_snapshot(value)
+    assert(files:writeJSON(invalid_directory.."/tasks.json",value))
+    local before=files:hash(invalid_directory.."/tasks.json")
+    local invalid=Service:new{storage=profiled.storage,directory=invalid_directory,
+        native_library=root.."/native/preprocess/build/moire-host.so",is_in_use=function() return false end,
+        schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
+    assert(not invalid.available and files:hash(invalid_directory.."/tasks.json")==before,"malformed batch/request snapshot must be preserved")
+end
+rejected_snapshot{schema_version=1,requests={},queue={schema_version=1,paused=true,jobs={}},batch=false}
+rejected_snapshot{schema_version=1,requests={{id=1,book_id="one",source_path=profiled_source,state="pending"},
+    {id=1,book_id="two",source_path=profiled_source,state="pending"}},queue={schema_version=1,paused=true,jobs={}}}
 local Storage=require("koobone.storage")
 local records={}
 local real_storage=Storage:new{download=function() return {directory=directory,records=records} end,flush=function() end}
