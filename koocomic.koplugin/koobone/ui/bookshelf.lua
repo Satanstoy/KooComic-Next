@@ -5,6 +5,7 @@ local MultiInputDialog = require("ui/widget/multiinputdialog")
 local UIManager = require("ui/uimanager")
 local BookDetail = require("koobone.ui.book_detail")
 local Util = require("koobone.util")
+local Navigation = require("koobone.ui.shelf_navigation")
 
 local grid_available, BookshelfGrid = pcall(require, "koobone.ui.bookshelf_grid")
 
@@ -12,7 +13,7 @@ local Bookshelf = {}
 Bookshelf.__index = Bookshelf
 
 function Bookshelf:new(options)
-    return setmetatable({
+    local shelf = setmetatable({
         library = assert(options.library, "library required"),
         storage = assert(options.storage, "storage required"),
         downloader = assert(options.downloader, "downloader required"),
@@ -27,6 +28,8 @@ function Bookshelf:new(options)
         cover_generation = 0,
         grid_view = nil,
     }, self)
+    shelf.navigation = Navigation:new{account_id=options.settings:account().uin, storage=options.storage}
+    return shelf
 end
 
 local function progress(item)
@@ -126,6 +129,9 @@ end
 
 function Bookshelf:_gridOptions(books)
     local search_label, sort_label, filter_label = self:_labels()
+    local nav = self.navigation
+    nav.query, nav.sort_mode, nav.filter_mode = self.query, self.sort_mode, self.filter_mode
+    books = nav:items(books)
     return {
         books = books,
         storage = self.storage,
@@ -134,7 +140,28 @@ function Bookshelf:_gridOptions(books)
         search_label = search_label,
         sort_label = sort_label,
         filter_label = filter_label,
+        mode = nav.mode,
+        page = nav.page,
+        path_label = nav.series and nav.series.title or (self.query ~= "" and self.query or ""),
+        on_view = function(mode)
+            nav:switch(mode)
+            self.query, self.sort_mode, self.filter_mode = nav.query, nav.sort_mode, nav.filter_mode
+            self:_render()
+        end,
+        on_back = function()
+            if not nav:back() then return false end
+            self.query, self.sort_mode, self.filter_mode = nav.query, nav.sort_mode, nav.filter_mode
+            self:_render()
+            return true
+        end,
+        on_menu = function() self:showMore() end,
         on_select = function(item)
+            if item._series then
+                nav:enter(item._series)
+                self.query = nav.query
+                self:_render()
+                return
+            end
             BookDetail.show{
                 item = item,
                 storage = self.storage,
@@ -149,7 +176,10 @@ function Bookshelf:_gridOptions(books)
         on_downloads = self.on_downloads,
         on_account = self.on_account,
         on_settings = self.on_settings,
-        on_page_changed = function(items) self:_prefetchCovers(items) end,
+        on_page_changed = function(items, page)
+            nav.page = page
+            self:_prefetchCovers(items)
+        end,
     }
 end
 
@@ -212,7 +242,13 @@ function Bookshelf:_showListFallback(books)
 end
 
 function Bookshelf:show(books)
+    local account_id = tostring(self.settings:account().uin or "local")
+    if account_id ~= self.navigation.account_id then
+        self.navigation:setAccount(account_id)
+        self.query, self.sort_mode, self.filter_mode = "", "recent", "all"
+    end
     self.library.items = books or self.library.items or {}
+    self.navigation:setBooks(self.library.items)
     self:_prepareCachedCovers(self.library.items)
     local visible = self:_visibleBooks()
     if not grid_available then return self:_showListFallback(visible) end
@@ -334,6 +370,8 @@ function Bookshelf:showMore()
     dialog = ButtonDialog:new{
         title = "koo漫画",
         buttons = {
+            {{text="排序",callback=function() UIManager:close(dialog); self:showSort() end},
+             {text="筛选",callback=function() UIManager:close(dialog); self:showFilter() end}},
             {
                 {
                     text = "刷新书架",

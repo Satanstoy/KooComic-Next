@@ -127,9 +127,9 @@ assert(#view:visibleItems() == 6)
 assert(page_events[1].page == 1 and page_events[1].pages == 5)
 
 view:update{ ui = { portrait_columns = 2, portrait_rows = 2, text_size = "large" } }
-assert(view.perpage == 4)
-assert(view.pages == 7)
-assert(#view:visibleItems() == 4)
+assert(view.perpage == 2, "two wide covers cannot be squeezed into two short rows")
+assert(view.pages == 14)
+assert(#view:visibleItems() == 2)
 
 view:update{ ui = { portrait_columns = 3, portrait_rows = 2, text_size = "large" } }
 assert(view.perpage == 6)
@@ -145,16 +145,12 @@ assert(view.page == 1)
 assert(view.pages == 1)
 assert(#view:visibleItems() == 2)
 
--- The header uses symmetric actions: refresh at left and an explicit close
--- button at right. The old back arrow and redundant overflow menu are gone.
-local header = view[1][2][1]
-assert(#header == 3)
-local close_icon = header[3][1][1][1]
-assert(close_icon.icon == "close")
-header[1].callback()
-assert(refresh_count == 1)
-assert(view.closed == false)
-header[3].callback()
+assert(view.layout and view.layout.header.h <= 52, "the old oversized header is still present")
+assert(view.layout.footer.y + view.layout.footer.h == 1200)
+assert(view.layout.footer.h <= 48, "pagination and commands must share a single footer")
+assert(view.chrome.tabs[1].label == "系列" and view.chrome.tabs[2].label == "单卷")
+assert(view.chrome.tabs[3].label == "已下载")
+view:onBack()
 assert(view.closed == true)
 
 print("bookshelf grid spec: OK")
