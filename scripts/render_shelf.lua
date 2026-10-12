@@ -25,6 +25,8 @@ for index=1, 8 do
     books[#books+1] = item
 end
 local view = Grid.show{books=books,mode=mode,ui={text_size=arg[7] or "normal",series_style=style},
+    selection_active=arg[8]=="selected",selected_count=arg[8]=="selected" and 1 or 0,
+    is_selected=function(item) return arg[8]=="selected" and not item._series and item==books[1] end,
     path_label=mode=="series" and "" or "示例系列",
     storage={isDownloaded=function() return false end,partSize=function() return 0 end}}
 local buffer = BB.new(Device.screen:getWidth(),Device.screen:getHeight(),BB.TYPE_BBRGB32)

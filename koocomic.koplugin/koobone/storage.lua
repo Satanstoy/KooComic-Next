@@ -198,17 +198,32 @@ function Storage:removeRecord(key)
 end
 
 function Storage:_deleteRecordFiles(key, final_path, part_path, delete_final, delete_part)
+    if delete_final and not self:isSafeLocalPath(final_path) then return nil,"阅读文件路径不安全" end
+    if delete_part and (not self:isSafeLocalPath(part_path) or not part_path:lower():match("%.part$")) then
+        return nil,"临时文件路径不安全"
+    end
+    if delete_final then
+        local reader
+        if self.is_in_use then reader=self.is_in_use(final_path)
+        else
+            local loaded,ReaderUI=pcall(require,"apps/reader/readerui")
+            reader=loaded and ReaderUI.instance and ReaderUI.instance.document and ReaderUI.instance.document.file==final_path
+        end
+        if reader then return nil,"漫画正在阅读，请先关闭阅读器" end
+    end
     if self.preprocess and (self.preprocess:isLocked(final_path) or self.preprocess:isLocked(part_path)) then
         return nil,"这本漫画正在处理，请先取消并等待任务结束。"
     end
-    local removed_bytes = 0
+    local removed_bytes,removed_files = 0,0
     if delete_final then
-        local ok, size_or_err = removeFile(final_path)
+        local ok, size_or_err,removed = removeFile(final_path)
         if not ok then return nil, size_or_err end
         removed_bytes = removed_bytes + (tonumber(size_or_err) or 0)
+        if removed then removed_files=removed_files+1 end
         if self.preprocess and self.preprocess.cleanup then
-            local cleaned,bytes=self.preprocess:cleanup(final_path)
-            if not cleaned then return nil,"阅读文件已删除，内部备份清理失败："..tostring(bytes) end
+            local called,cleaned,bytes=pcall(self.preprocess.cleanup,self.preprocess,final_path)
+            if not called or not cleaned then return nil,"阅读文件已删除，内部备份清理失败："..tostring(called and bytes or cleaned),
+                {bytes=removed_bytes,files=removed_files,lower_bound=true} end
             removed_bytes=removed_bytes+(tonumber(bytes) or 0)
         end
     end
@@ -217,9 +232,43 @@ function Storage:_deleteRecordFiles(key, final_path, part_path, delete_final, de
         if not ok then return nil, size_or_err end
         removed_bytes = removed_bytes + (tonumber(size_or_err) or 0)
     end
-    if key ~= nil then self.settings:download().records[key] = nil end
-    self.settings:flush()
-    return true, removed_bytes
+    if key ~= nil then
+        local record=self.settings:download().records[key]
+        if not delete_part and record and fileMode(part_path)=="file" then record.state="interrupted"
+        else self.settings:download().records[key] = nil end
+    end
+    local saved,save_error=pcall(self.settings.flush,self.settings)
+    if not saved then return nil,"文件删除后记录保存失败："..tostring(save_error),
+        {files=removed_files,bytes=removed_bytes,lower_bound=true} end
+    return true, removed_bytes,{files=removed_files,bytes=removed_bytes}
+end
+
+function Storage:fileIdentity(path)
+    if not self:isSafeLocalPath(path) or fileMode(path)~="file" or (lfs.attributes(path,"nlink") or 1)>1 then return nil end
+    local values={path}
+    for _,field in ipairs({"dev","ino","size","modification","change"}) do
+        values[#values+1]=tostring(lfs.attributes(path,field) or "")
+    end
+    return table.concat(values,"|")
+end
+
+function Storage:localDeleteInfo(item)
+    local key=self:itemKey(item)
+    local record=self.settings:download().records[key]
+    if type(record)~="table" or type(record.path)~="string" then return nil,"漫画没有可信的本地索引" end
+    if not record.path:lower():match("%.epub$") then return nil,"只允许批量删除已索引 EPUB" end
+    local path,state=self:resolveLocalPath(item)
+    if not path then return nil,state end
+    local identity=self:fileIdentity(path)
+    if not identity then return nil,"本地文件身份不安全" end
+    return {key=key,path=path,identity=identity,size=self:fileSize(path),title=record.title or item.vol_name or ""}
+end
+
+function Storage:deleteIndexedLocal(expected)
+    local record=self.settings:download().records[expected.key]
+    if type(record)~="table" or record.path~=expected.path or not expected.path:lower():match("%.epub$") or
+            self:fileIdentity(expected.path)~=expected.identity then return nil,"文件已变化，请重新确认" end
+    return self:_deleteRecordFiles(expected.key,expected.path,record.part_path or (expected.path..".part"),true,false)
 end
 
 function Storage:deleteItem(item)

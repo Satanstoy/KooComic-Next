@@ -176,6 +176,14 @@ assert(find(view,function(widget) return widget.text=="Original series/" and wid
 view:update{ui={series_style="text"}}
 local text_title=find(view,function(widget) return widget.text=="Original series/" end)
 assert(text_title and text_title.height<=80,"text-only title must use a compact centered area away from corner badges")
+view:update{books={books[1],books[2]},mode="volumes",selection_active=true,selected_count=1,
+    is_selected=function(item) return item==books[1] end,on_hold=function() end,on_selection_cancel=function() end}
+assert(view.chrome.selection==true,"multi-select must replace the actual footer, not add another bar")
+assert(find(view,function(widget) return widget.text=="\239\128\140" end),"selected covers need a visible check glyph")
+assert(find(view,function(widget) return widget.description=="删除本地" end),"selection footer must expose local delete")
+view:update{selected_count=0,on_selection_delete=function() error("empty selection deletion") end}
+local empty_delete=find(view,function(widget) return widget.description=="删除本地" end)
+assert(not empty_delete.callback,"disabled empty-selection delete must not retain a tap callback")
 view:onBack()
 assert(view.closed == true)
 

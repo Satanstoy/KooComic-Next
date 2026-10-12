@@ -1,6 +1,6 @@
 package.path = "./koocomic.koplugin/?.lua;" .. package.path
 local function widget() return {new=function(_, fields) return fields end} end
-for _, name in ipairs({"buttondialog","infomessage","menu","multiinputdialog"}) do
+for _, name in ipairs({"buttondialog","infomessage","menu","multiinputdialog","confirmbox"}) do
     package.preload["ui/widget/"..name] = widget
 end
 package.preload["socket"] = function() return {gettime=os.time} end
@@ -55,4 +55,28 @@ assert(#fetched==4 and fetched[1]==members[1] and fetched[4]==members[4],"collag
 ui.series_style="text";fetched={}
 shelf:_prefetchCovers({{_series={books=members}}})
 assert(#callbacks==0,"text style must not schedule artwork downloads")
+shelf.cover_cache=nil
+shelf:show(books)
+current.on_view("volumes")
+assert(type(current.on_hold)=="function","holding a volume must enter actual multi-selection")
+current.on_hold(books[1])
+assert(current.selection_active and current.selected_count==1 and current.is_selected(books[1]))
+current.on_select(books[2])
+assert(current.selected_count==2)
+current.on_back()
+assert(not current.selection_active,"Back should cancel selection before leaving the view")
+current.on_view("series")
+current.on_hold(current.books[1])
+assert(shown.title=="Series" and not current.selection_active,"holding a series must show actions, not select every volume")
+local deleted=0
+shelf.local_manager={preview=function(_,items) assert(#items==2);return {
+    files=2,bytes=30,skipped=0,entries={{title="A"},{title="B"}}} end,
+    execute=function(_,preview,done,guard)
+        assert(guard());deleted=preview.files
+        done({success=2,failed=0,files_removed=2,bytes=30,errors={}});return true
+    end}
+shown.buttons[2][1].callback()
+assert(shown.ok_callback and deleted==0,"series delete must preview and require explicit confirmation")
+shown.ok_callback()
+assert(deleted==2 and shown.text:find("删除 2 个阅读文件",1,true),"actual series action must execute and show a result")
 print("shelf controller spec: OK")

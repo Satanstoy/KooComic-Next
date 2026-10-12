@@ -12,6 +12,7 @@ package.preload["socket"] = function()
 end
 package.preload["ui/widget/buttondialog"] = widget
 package.preload["ui/widget/infomessage"] = widget
+package.preload["ui/widget/confirmbox"] = widget
 package.preload["ui/widget/menu"] = widget
 package.preload["ui/widget/multiinputdialog"] = widget
 package.preload["ui/uimanager"] = function()

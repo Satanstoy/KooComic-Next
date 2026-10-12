@@ -6,6 +6,9 @@ local UIManager = require("ui/uimanager")
 local BookDetail = require("koobone.ui.book_detail")
 local Util = require("koobone.util")
 local Navigation = require("koobone.ui.shelf_navigation")
+local Selection = require("koobone.selection")
+local LocalManager = require("koobone.local_manager")
+local ConfirmBox = require("ui/widget/confirmbox")
 
 local grid_available, BookshelfGrid = pcall(require, "koobone.ui.bookshelf_grid")
 
@@ -31,6 +34,9 @@ function Bookshelf:new(options)
         grid_view = nil,
     }, self)
     shelf.navigation = Navigation:new{account_id=options.settings:account().uin, storage=options.storage}
+    shelf.selection=Selection:new(options.settings:account().uin)
+    shelf.local_manager=options.local_manager or LocalManager:new{storage=options.storage,downloader=options.downloader,
+        coordinator=options.downloader.coordinator}
     return shelf
 end
 
@@ -155,6 +161,16 @@ function Bookshelf:_gridOptions(books)
         filter_label = filter_label,
         mode = nav.mode,
         page = nav.page,
+        selection_active=self.selection.active,
+        selected_count=self.selection:count(),
+        is_selected=function(item) return not item._series and self.selection:contains(item) end,
+        on_hold=function(item)
+            if item._series then self:showSeriesActions(item._series)
+            else self.selection:begin(item);self:_render() end
+        end,
+        on_selection_cancel=function() self.selection:cancel();self:_render() end,
+        on_selection_delete=function() self:confirmDelete(self.selection:resolve(self.library.items)) end,
+        on_selection_more=function() self:showSelectionActions() end,
         path_label = nav.series and nav.series.title or (self.query ~= "" and self.query or ""),
         on_view = function(mode)
             nav:switch(mode)
@@ -162,6 +178,7 @@ function Bookshelf:_gridOptions(books)
             self:_render()
         end,
         on_back = function()
+            if self.selection.active then self.selection:cancel();self:_render();return true end
             if not nav:back() then return false end
             self.query, self.sort_mode, self.filter_mode = nav.query, nav.sort_mode, nav.filter_mode
             self:_render()
@@ -175,6 +192,7 @@ function Bookshelf:_gridOptions(books)
                 self:_render()
                 return
             end
+            if self.selection.active then self.selection:toggle(item);self:_render();return end
             BookDetail.show{
                 item = item,
                 storage = self.storage,
@@ -263,6 +281,8 @@ function Bookshelf:show(books)
         self.query, self.sort_mode, self.filter_mode = "", "recent", "all"
     end
     self.library.items = books or self.library.items or {}
+    self.selection:setAccount(account_id)
+    self.selection:reconcile(self.library.items)
     self.navigation:setBooks(self.library.items)
     self:_prepareCachedCovers(self.library.items)
     local visible = self:_visibleBooks()
@@ -297,6 +317,55 @@ function Bookshelf:show(books)
     self.grid_view = view
     self.menu = view
     return view
+end
+
+function Bookshelf:showSeriesActions(series)
+    local dialog
+    dialog=ButtonDialog:new{title=series.title,buttons={
+        {{text="选择系列中的卷",callback=function()
+            UIManager:close(dialog);self.navigation:enter(series);self.query="";self.selection:begin();self:_render()
+        end}},
+        {{text="删除系列本地文件",callback=function() UIManager:close(dialog);self:confirmDelete(series.books) end}},
+        {{text="关闭",callback=function() UIManager:close(dialog) end}},
+    }}
+    UIManager:show(dialog)
+end
+
+function Bookshelf:showSelectionActions()
+    local dialog
+    dialog=ButtonDialog:new{title="已选 "..self.selection:count().." 卷",buttons={
+        {{text="删除所选本地文件",callback=function()
+            UIManager:close(dialog);self:confirmDelete(self.selection:resolve(self.library.items))
+        end}},
+        {{text="取消选择",callback=function() UIManager:close(dialog);self.selection:cancel();self:_render() end}},
+        {{text="关闭",callback=function() UIManager:close(dialog) end}},
+    }}
+    UIManager:show(dialog)
+end
+
+function Bookshelf:confirmDelete(items)
+    local preview=self.local_manager:preview(items)
+    if preview.files==0 then UIManager:show(InfoMessage:new{text="没有可安全删除的已索引本地 EPUB。"});return end
+    local account=tostring(self.settings:account().uin or "")
+    local names={};for index=1,math.min(3,#preview.entries) do names[#names+1]=preview.entries[index].title end
+    UIManager:show(ConfirmBox:new{
+        text=string.format("删除 %d 个本地 EPUB，阅读文件共 %s？\n%s\n\n同时清理关联内部原版备份，之后不能恢复原版。\n保留 .part、阅读 sidecar 和云端漫画。\n跳过 %d 项。",
+            preview.files,Util.friendlySize(preview.bytes),table.concat(names,"\n"),preview.skipped),
+        ok_text="删除本地文件",cancel_text="取消",ok_callback=function()
+            local ok,err=self.local_manager:execute(preview,function(result)
+                if tostring(self.settings:account().uin or "")~=account then return end
+                self.selection:cancel()
+                if self.grid_view and not self.grid_view.closed then self:_render() end
+                local errors={}
+                for index=1,math.min(5,#result.errors) do
+                    local failure=result.errors[index];errors[#errors+1]=(failure.title or failure.key).."："..failure.error
+                end
+                UIManager:show(InfoMessage:new{text=string.format("完成 %d 项，失败 %d 项；删除 %d 个阅读文件，释放%s %s。\n%s",
+                    result.success,result.failed,result.files_removed,result.lower_bound and "至少" or "",Util.friendlySize(result.bytes),table.concat(errors,"\n"))})
+            end,function() return tostring(self.settings:account().uin or "")==account end)
+            if not ok then UIManager:show(InfoMessage:new{text=tostring(err)}) end
+        end,
+    })
 end
 
 function Bookshelf:_render()
@@ -385,6 +454,11 @@ function Bookshelf:showMore()
     dialog = ButtonDialog:new{
         title = "koo漫画",
         buttons = {
+            {{text="选择卷",callback=function()
+                UIManager:close(dialog)
+                if self.navigation.mode=="series" and not self.navigation.series then self.navigation:switch("volumes") end
+                self.selection:begin();self:_render()
+            end}},
             {{text="排序",callback=function() UIManager:close(dialog); self:showSort() end},
              {text="筛选",callback=function() UIManager:close(dialog); self:showFilter() end}},
             {{text="图像优化 / 去彩纹管理",callback=function()

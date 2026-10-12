@@ -114,7 +114,8 @@ function Service:cleanup(path)
                     paths.reading,paths.cancel,paths.permission,paths.journal,paths.claim}) do
                 if not seen[artifact] then
                     seen[artifact]=true
-                    local size=tonumber(require("libs/libkoreader-lfs").attributes(artifact,"size")) or 0
+                    local attribute=require("libs/libkoreader-lfs").attributes(artifact,"size")
+                    local size=tonumber(attribute) or 0
                     local removed,err=self.files:remove(artifact)
                     if not removed then return nil,err end
                     total=total+size

@@ -283,7 +283,8 @@ local function badge(text, width, height)
         })
 end
 
-local function bookCard(item, width, height, storage, callback, ui)
+local function bookCard(item, width, height, storage, callback, ui, controls)
+    controls=controls or {}
     local title_h = dp(40)
     local gap = dp(2)
     local shadow = Space.px(4)
@@ -384,6 +385,14 @@ local function bookCard(item, width, height, storage, callback, ui)
             badge(badge_text, badge_w, badge_h),
         }
     end
+    if controls.selected then
+        cover_layers[#cover_layers+1]=OffsetContainer:new{x_off=math.floor(ribbon/2),y_off=0,
+            CoverCard.RoundedCornerCard:new{width=cover_w,height=cover_h,radius=Space.px(4),
+                border_size=Space.px(3),border_color=BLACK}}
+        local check_size=dp(28)
+        cover_layers[#cover_layers+1]=OffsetContainer:new{x_off=math.max(0,cover_w-check_size),y_off=cover_h-check_size,
+            fixedFrame(check_size,check_size,{bordersize=dp(1),background=WHITE,color=BLACK},Icons.build("check",18))}
+    end
 
     local body = VerticalGroup:new{
         align = "center",
@@ -393,7 +402,7 @@ local function bookCard(item, width, height, storage, callback, ui)
     if not item._series or StackDisplay.needsExternalLabel(style) then
         body[#body+1] = textBox(title,width,title_h,14,{bold=true})
     end
-    return tappable(width, height, body, callback, { hold_callback = callback })
+    return tappable(width, height, body, callback, { hold_callback = controls.on_hold or callback })
 end
 
 local GridShelf = InputContainer:extend{
@@ -449,6 +458,7 @@ function GridShelf:_buildChrome(layers, layout)
     local header = HorizontalGroup:new{}
     self.chrome = {tabs={},footer={}}
     local function iconButton(kind,w,h,callback,disabled)
+        if disabled then callback=nil end
         local button=tappable(w,h,Icons.build(kind,20,disabled),callback,{hold_callback=function()
             UIManager:show(require("ui/widget/infomessage"):new{text=Icons.name(kind)})
         end})
@@ -471,6 +481,19 @@ function GridShelf:_buildChrome(layers, layout)
         self:_add(layers,layout.path.x,layout.path.y,textBox(self.options.path_label,layout.path.w,layout.path.h,12,{}))
     end
     local side = math.max(dp(40),footer_h)
+    if self.options.selection_active then
+        self.chrome.selection=true
+        local footer=HorizontalGroup:new{
+            iconButton("menu",side,footer_h,self.options.on_selection_more),
+            iconButton("previous",side,footer_h,self.page>1 and function() self:_changePage(self.page-1) end or nil,self.page<=1),
+            singleLine("已选 "..tostring(self.options.selected_count or 0),width-side*5,footer_h,14,{}),
+            iconButton("next",side,footer_h,self.page<self.pages and function() self:_changePage(self.page+1) end or nil,self.page>=self.pages),
+            iconButton("delete",side,footer_h,self.options.on_selection_delete,(self.options.selected_count or 0)==0),
+            iconButton("cancel",side,footer_h,self.options.on_selection_cancel),
+        }
+        self:_add(layers,0,layout.footer.y,footer)
+        return
+    end
     local narrow = width < side*7
     local arrows = narrow and 2 or 4
     local middle = width-side*(2+arrows)
@@ -627,7 +650,9 @@ function GridShelf:_build()
             rect.x,rect.y,
             bookCard(item,rect.w,rect.h,self.options.storage,function()
                 if self.options.on_select then self.options.on_select(item) end
-            end,self.options.ui))
+            end,self.options.ui,{selected=self.options.is_selected and self.options.is_selected(item),
+                on_hold=function() if self.options.on_hold then self.options.on_hold(item)
+                    elseif self.options.on_select then self.options.on_select(item) end end}))
         slot = slot + 1
     end
     if #self.options.books == 0 then

@@ -221,6 +221,7 @@ function KooComic:showAccount()
             self.library:clear()
             self.bookshelf.cover_generation=self.bookshelf.cover_generation+1
             self.bookshelf.navigation:setAccount("local")
+            self.bookshelf.selection:setAccount("local")
             if self.bookshelf and self.bookshelf.menu then
                 UIManager:close(self.bookshelf.menu)
                 self.bookshelf.menu = nil

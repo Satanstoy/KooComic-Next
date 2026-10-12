@@ -247,4 +247,23 @@ for _=1,100 do
 end
 assert(files:hash(dead_source)==fingerprint,"late hashes must not commit after the worker exits")
 assert(not files:exists(dead_paths.permission),"late hashes must not authorize a retry worker")
+local Storage=require("koobone.storage")
+local records={}
+local real_storage=Storage:new{download=function() return {directory=directory,records=records} end,flush=function() end}
+local item={file_md5="processed-book",vol_name="Processed book"}
+records[real_storage:itemKey(item)]={path=source,title=item.vol_name,state="complete"}
+real_storage.is_in_use=function() return false end
+real_storage.preprocess=recovered
+local callbacks,result={},nil
+local manager=require("koobone.local_manager"):new{storage=real_storage,
+    schedule=function(_,callback) callbacks[#callbacks+1]=callback end}
+local preview=manager:preview({item})
+assert(preview.files==1)
+local backup=recovered.worker:paths(cancelled_job).backup
+assert(files:exists(backup),"processed-book deletion must exercise a real retained original")
+assert(manager:execute(preview,function(value) result=value end))
+while #callbacks>0 do table.remove(callbacks,1)() end
+assert(result.success==1 and result.failed==0 and result.files_removed==1,
+    "processed EPUB deletion must tolerate absent worker temporary files and finish cleanup")
+assert(not files:exists(source) and not files:exists(backup) and not records[real_storage:itemKey(item)])
 print("KOReader real EPUB integration: OK")
