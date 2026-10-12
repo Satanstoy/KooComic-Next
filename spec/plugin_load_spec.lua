@@ -16,6 +16,8 @@ local function class()
 end
 
 local Widget = class()
+local scheduled, shown = {}, {}
+local defer_network, waiting = false, {}
 local noop_widget_modules = {
     "ui/widget/buttondialog",
     "ui/widget/checkbutton",
@@ -54,14 +56,16 @@ package.preload["datastorage"] = function()
 end
 package.preload["ui/network/manager"] = function()
     return {
-        runWhenOnline = function(_, callback) callback() end,
+        runWhenOnline = function(_, callback)
+            if defer_network then waiting[#waiting + 1] = callback else callback() end
+        end,
         isConnected = function() return false end,
     }
 end
 package.preload["ui/uimanager"] = function()
     return {
-        scheduleIn = function() end,
-        show = function() end,
+        scheduleIn = function(_, _, callback) scheduled[#scheduled + 1] = callback end,
+        show = function(_, widget) shown[#shown + 1] = widget end,
         close = function() end,
         setDirty = function() end,
         forceRePaint = function() end,
@@ -169,5 +173,40 @@ instance:init()
 assert(instance.settings ~= nil)
 assert(instance.downloader ~= nil)
 assert(instance.updater ~= nil)
+
+local menu = {}
+instance:addToMainMenu(menu)
+local probe_action
+for _, action in ipairs(menu.koocomic.sub_item_table) do
+    if action.text == "书库能力探测（只读）" then probe_action = action end
+end
+assert(probe_action, "the read-only catalog probe menu is not implemented")
+local limits = {}
+instance.auth.restore = function() return true end
+instance.api.library = function(_, limit)
+    limits[#limits + 1] = limit
+    return { data = {} }
+end
+probe_action.callback()
+scheduled[#scheduled]()
+assert(#limits == 3 and limits[1] == 28 and limits[3] == 100)
+assert(shown[#shown].text:find("尚未确认", 1, true))
+instance.auth.restore = function() return nil, "private auth error" end
+probe_action.callback()
+scheduled[#scheduled]()
+assert(#limits == 3, "probe must not request a private catalog after failed authentication")
+assert(not shown[#shown].text:find("private", 1, true))
+defer_network = true
+local before = #scheduled
+probe_action.callback()
+probe_action.callback()
+assert(#waiting == 2)
+waiting[1]()
+waiting[2]()
+assert(#scheduled == before + 1, "deferred online callbacks must not schedule duplicate probes")
+instance.auth.restore = function() error("private auth exception") end
+scheduled[#scheduled]()
+assert(instance.catalog_probe_running == false, "failed probes must release the running guard")
+assert(not shown[#shown].text:find("private", 1, true))
 
 print("plugin load spec: OK")

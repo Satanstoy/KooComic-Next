@@ -14,6 +14,7 @@ local AccountUI = require("koobone.ui.account")
 local Api = require("koobone.api")
 local Auth = require("koobone.auth")
 local Bookshelf = require("koobone.ui.bookshelf")
+local CatalogProbe = require("koobone.catalog_probe")
 local CoverCache = require("koobone.cover_cache")
 local Downloader = require("koobone.downloader")
 local DownloadsUI = require("koobone.ui.downloads")
@@ -107,6 +108,10 @@ function KooComic:addToMainMenu(menu_items)
                 callback = function() self:showSettings() end,
             },
             {
+                text = "书库能力探测（只读）",
+                callback = function() self:probeCatalogCapabilities() end,
+            },
+            {
                 text = "关于 koo漫画",
                 keep_menu_open = true,
                 callback = function()
@@ -124,6 +129,30 @@ end
 
 function KooComic:ensureOnline(callback)
     NetworkMgr:runWhenOnline(callback)
+end
+
+function KooComic:probeCatalogCapabilities()
+    if self.downloader:isActive() or self.catalog_probe_running then
+        UIManager:show(InfoMessage:new{ text = "请等待当前下载或探测结束。" })
+        return
+    end
+    self:ensureOnline(function()
+        if self.downloader:isActive() or self.catalog_probe_running then return end
+        self.catalog_probe_running = true
+        UIManager:show(InfoMessage:new{ text = "正在验证登录并探测书库……", timeout = 1 })
+        UIManager:scheduleIn(0.15, function()
+            local succeeded, result = pcall(function()
+                if self.downloader:isActive() then return "请等待当前下载结束。" end
+                local authenticated = self.auth:restore()
+                if not authenticated then return "登录验证未成功，请先登录后再进行书库探测。" end
+                return CatalogProbe.format(CatalogProbe:new(self.api):run())
+            end)
+            self.catalog_probe_running = false
+            UIManager:show(InfoMessage:new{
+                text = succeeded and result or "书库探测失败，未修改已有目录或下载记录。",
+            })
+        end)
+    end)
 end
 
 function KooComic:showLogin()

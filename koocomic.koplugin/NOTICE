@@ -12,5 +12,9 @@ Fork provenance: https://github.com/jackchensky/KooComic
 Derived repository: https://github.com/Satanstoy/KooComic-Next
 Maintainer of derived work: Satanstoy
 2026-10-12: Added fork documentation, a Next specification archive, and
-design decision records. Next source functionality has not yet been implemented.
+design decision records.
+2026-10-12: Added catalog normalization, series indexing, atomic snapshot
+storage, a read-only limit probe, and recorded-path lookup for existing
+downloads. Full catalog synchronization and the Next workflow are not yet
+implemented or device-validated.
 Original copyright notices and the AGPL-3.0-only license are retained.
