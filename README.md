@@ -1,3 +1,18 @@
+# KooComic Next
+
+本仓库是 [jackchensky/KooComic](https://github.com/jackchensky/KooComic) 的派生开发版，由 [Satanstoy](https://github.com/Satanstoy) 维护，保留上游提交历史、版权声明及 `AGPL-3.0-only` 许可证。2026-10-12 起在上游基础上整理重构规格、术语和设计决策；当前尚未实现 Next 功能，也没有发布派生版安装包。
+
+- [Next 规格草案](doc/KooComic_Next_SPEC.md)
+- [已确认的设计评审决策](docs/design-review-decisions.md)与[架构决策记录](docs/adr/)
+- [领域术语表](CONTEXT.md)
+- [派生仓库维护说明](FORK.md)
+
+规格草案保留原文。评审确认的变更与约束见设计评审决策及 ADR，实施前需要合并为更新后的规格；文件名冲突处理仍待确认。
+
+当前插件的在线更新配置仍指向上游，正式发行派生版前需要配置独立更新渠道。下面保留上游 README，其徽章、版本、安装链接及更新说明均属于上游项目。
+
+## 上游项目说明
+
 <p align="center">
   <img src="assets/koocomic-social-preview.jpg" alt="KooComic / koo漫画 — KOReader 漫画书架" width="100%">
 </p>

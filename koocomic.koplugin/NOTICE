@@ -7,3 +7,10 @@ version 3 only (AGPL-3.0-only).
 koo漫画 is an independently developed, unofficial KOReader plugin. It is not
 affiliated with, sponsored by, or endorsed by KOOBONE, Bookof.hk, or their
 developers. The KOOBONE name is used only to identify the compatible service.
+
+Fork provenance: https://github.com/jackchensky/KooComic
+Derived repository: https://github.com/Satanstoy/KooComic-Next
+Maintainer of derived work: Satanstoy
+2026-10-12: Added fork documentation, a Next specification archive, and
+design decision records. Next source functionality has not yet been implemented.
+Original copyright notices and the AGPL-3.0-only license are retained.
