@@ -67,6 +67,7 @@ jobs:
           SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-components ./luajit "$GITHUB_WORKSPACE/spec/koreader_bookshelf_components_integration.lua" "$GITHUB_WORKSPACE"
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_catalog_integration.lua" "$GITHUB_WORKSPACE"
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_local_manager_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_download_queue_integration.lua" "$GITHUB_WORKSPACE"
 
       - name: Build a test release package
         shell: bash
