@@ -36,7 +36,12 @@ function BookDetail.show(options)
                 callback = function()
                     dialog:close()
                     if downloaded then
-                        downloader:open(storage:itemPath(item))
+                        local path = storage:resolveLocalPath(item)
+                        if path then
+                            downloader:open(path)
+                        else
+                            UIManager:show(InfoMessage:new{ text = "本地文件已丢失或路径不可用，请刷新书库。" })
+                        end
                     else
                         downloader:download(item)
                     end
@@ -60,7 +65,11 @@ function BookDetail.show(options)
                         UIManager:show(InfoMessage:new{ text = "请等待当前下载任务结束后再删除。" })
                         return
                     end
-                    local path = storage:itemPath(item)
+                    local path = storage:resolveLocalPath(item)
+                    if not path then
+                        UIManager:show(InfoMessage:new{ text = "本地文件已丢失或路径不可用，请刷新书库。" })
+                        return
+                    end
                     local size = storage:fileSize(path)
                     UIManager:show(ConfirmBox:new{
                         text = table.concat({

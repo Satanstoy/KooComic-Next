@@ -41,14 +41,23 @@ function Downloader:download(item)
         UIManager:show(InfoMessage:new{ text = "已有一个下载任务正在进行。" })
         return
     end
-    local final_path = self.storage:itemPath(item)
-    if self.storage:isDownloaded(item) then
+    local local_path = self.storage:resolveLocalPath(item)
+    if local_path then
         UIManager:show(ConfirmBox:new{
-            text = "这本漫画已经下载完成。\n\n" .. final_path,
+            text = "这本漫画已经下载完成。\n\n" .. local_path,
             cancel_text = "关闭",
             ok_text = "打开阅读",
-            ok_callback = function() self:open(final_path) end,
+            ok_callback = function()
+                local path = self.storage:resolveLocalPath(item)
+                if path then self:open(path) end
+            end,
         })
+        return
+    end
+
+    local final_path, path_err = self.storage:resolveDownloadPath(item)
+    if not final_path then
+        UIManager:show(InfoMessage:new{ text = "下载路径不可用或与其他漫画冲突：" .. tostring(path_err) })
         return
     end
 
@@ -75,8 +84,16 @@ function Downloader:download(item)
             return
         end
 
-        local part_path = self.storage:partPath(fresh)
-        final_path = self.storage:itemPath(fresh)
+        final_path, path_err = self.storage:resolveDownloadPath(fresh)
+        if not final_path then
+            self.active = false
+            dialog:close()
+            self.storage:record(fresh, "failed", { error = "下载路径不可用或冲突" })
+            UIManager:show(InfoMessage:new{ text = "下载路径不可用或与其他漫画冲突：" .. tostring(path_err) })
+            self:_finishChanged()
+            return
+        end
+        local part_path = final_path .. ".part"
         local total = tonumber(fresh.file_size) or tonumber(item.file_size) or 0
         local started_at = Util.now()
         self.storage:record(fresh, "downloading", { bytes = 0, total = total })

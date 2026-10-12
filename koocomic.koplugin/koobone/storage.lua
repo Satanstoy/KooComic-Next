@@ -72,7 +72,56 @@ function Storage:partPath(item)
 end
 
 function Storage:isDownloaded(item)
-    return lfs.attributes(self:itemPath(item), "mode") == "file"
+    return self:resolveLocalPath(item) ~= nil
+end
+
+function Storage:isSafeLocalPath(path)
+    if type(path) ~= "string" or path:sub(1, 1) ~= "/" or path:find("[%c]") then return false end
+    local root = self:downloadDir():gsub("/+$", "")
+    if path:sub(1, #root + 1) ~= root .. "/" or path:find("//", 1, true) then return false end
+    if not lfs.symlinkattributes then return false end
+    local prefix = ""
+    for component in path:gmatch("[^/]+") do
+        if component == "." or component == ".." then return false end
+        prefix = prefix .. "/" .. component
+        if lfs.symlinkattributes(prefix, "mode") == "link" then return false end
+    end
+    return true
+end
+
+function Storage:_recordPath(item)
+    local records = self.settings:download().records
+    local key = self:itemKey(item)
+    local record = records[key]
+    local path = record and record.path or self:itemPath(item)
+    if not self:isSafeLocalPath(path) then return nil, "invalid_path" end
+    for other_key, other in pairs(records) do
+        if other_key ~= key and type(other) == "table" and other.path == path then
+            return nil, "conflict"
+        end
+    end
+    return path, record and "recorded" or "new"
+end
+
+function Storage:resolveDownloadPath(item)
+    local path, state = self:_recordPath(item)
+    if not path then return nil, state end
+    local part_path = path .. ".part"
+    if not self:isSafeLocalPath(part_path) then return nil, "invalid_path" end
+    for key, record in pairs(self.settings:download().records) do
+        if key ~= self:itemKey(item) and type(record) == "table" and
+                (record.path == part_path or record.part_path == part_path) then
+            return nil, "conflict"
+        end
+    end
+    return path, state
+end
+
+function Storage:resolveLocalPath(item)
+    local path, state = self:_recordPath(item)
+    if not path then return nil, state end
+    if fileMode(path) == "file" then return path, "downloaded" end
+    return nil, state == "recorded" and "missing" or "not_downloaded"
 end
 
 function Storage:fileSize(path)
@@ -92,7 +141,7 @@ function Storage:record(item, state, extra)
     local key = self:itemKey(item)
     local value = records[key] or {}
     value.title = item.vol_name or item.vol_series or ""
-    value.path = self:itemPath(item)
+    value.path = value.path or self:itemPath(item)
     value.state = state
     value.updated_at = os.time()
     if state == "preparing" or state == "downloading" or state == "complete" then
