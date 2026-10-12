@@ -15,6 +15,7 @@ local Api = require("koobone.api")
 local Auth = require("koobone.auth")
 local Bookshelf = require("koobone.ui.bookshelf")
 local CatalogProbe = require("koobone.catalog_probe")
+local CatalogStore = require("koobone.catalog_store")
 local CoverCache = require("koobone.cover_cache")
 local Downloader = require("koobone.downloader")
 local DownloadsUI = require("koobone.ui.downloads")
@@ -44,7 +45,8 @@ function KooComic:init()
     self.auth = Auth:new(self.settings, self.api)
     self.storage = Storage:new(self.settings)
     self.cover_cache = CoverCache:new(self.api)
-    self.library = Library:new(self.api, self.storage)
+    self.library = Library:new(self.api, self.storage,{store=CatalogStore:new{
+        directory=DataStorage:getSettingsDir().."/koocomic-catalog"},account=function() return self.settings:account().uin end})
     self.preprocess = PreprocessService:get{storage=self.storage,
         directory=DataStorage:getSettingsDir().."/koocomic-preprocess"}
     self.storage.preprocess = self.preprocess
@@ -179,6 +181,15 @@ function KooComic:showLogin()
 end
 
 function KooComic:openBookshelf()
+    if self.auth:hasSession() then
+        local cached=self.library:loadCache()
+        if cached then
+            self.bookshelf:show(cached)
+            if not NetworkMgr:isConnected() then return end
+        end
+    else
+        self.library:clear()
+    end
     self:ensureOnline(function()
         UIManager:show(InfoMessage:new{ text = "正在验证登录状态……", timeout = 1 })
         UIManager:scheduleIn(0.15, function()
@@ -207,6 +218,9 @@ function KooComic:showAccount()
         auth = self.auth,
         on_login = function() self:showLogin() end,
         on_logout = function()
+            self.library:clear()
+            self.bookshelf.cover_generation=self.bookshelf.cover_generation+1
+            self.bookshelf.navigation:setAccount("local")
             if self.bookshelf and self.bookshelf.menu then
                 UIManager:close(self.bookshelf.menu)
                 self.bookshelf.menu = nil

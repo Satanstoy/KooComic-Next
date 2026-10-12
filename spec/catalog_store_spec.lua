@@ -41,6 +41,9 @@ assert(store:commit("42", { entry }, complete))
 local snapshot = assert(store:load("42"))
 assert(snapshot.entries[1].title == "First" and snapshot.account_id == "42")
 assert(snapshot.meta.coverage == "complete")
+entry.file_type,entry.remote_pages,entry.remote_page="epub",120,17
+assert(store:commit("42",{entry},complete))
+assert(store:load("42").entries[1].remote_pages==120,"offline details must retain clearly labelled remote progress")
 entry.title = "Second"
 fail_write = true
 assert(store:commit("42", { entry }, complete) == nil)
@@ -69,6 +72,12 @@ assert(store:commit("42", { [1] = entry, [3] = entry }, complete) == nil,
     "sparse arrays must not be silently truncated")
 assert(store:commit("42", { book = entry }, complete) == nil,
     "objects must not be silently accepted as empty catalogs")
+local previous=files["/cache/42.json"]
+local encode=codec.encode
+codec.encode=function() return string.rep("x",32*1024*1024+1) end
+assert(not store:commit("42",{entry},complete) and files["/cache/42.json"]==previous,
+    "snapshots exceeding the read budget must never replace a usable cache")
+codec.encode=encode
 files["/cache/42.json"] = "broken-json"
 assert(store:load("42") == nil, "corrupted snapshots must not crash or be accepted")
 

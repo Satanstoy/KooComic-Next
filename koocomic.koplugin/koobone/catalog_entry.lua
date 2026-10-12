@@ -38,6 +38,9 @@ function CatalogEntry.normalize(account_id, item, options)
         series_id = options and options.series_id_verified == true and text(item.vol_series_id) or nil,
         volume_label = item.vol_index,
         remote_size = tonumber(item.file_size),
+        file_type = type(item.file_type)=="string" and item.file_type or "epub",
+        remote_pages = tonumber(item.count_page),
+        remote_page = tonumber(item.last_readpage),
     }
 end
 

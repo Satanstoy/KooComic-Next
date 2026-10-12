@@ -49,5 +49,12 @@ assert(ok == true, err)
 assert(#shown == 2)
 assert(shown[2].text:find("生成书架界面时发生错误", 1, true) ~= nil)
 assert(shown[2].text:find("simulated item rendering failure", 1, true) ~= nil)
+local callback
+shelf.library.refresh=function() error("network request reached UI thread") end
+shelf.library.refreshAsync=function(_,done) callback=done;return {} end
+shelf:refresh()
+assert(callback,"production shelf refresh must use the isolated catalog runner")
+callback({{vol_name="Async book"}})
+assert(shown[#shown].text:find("生成书架界面时发生错误",1,true))
 
 print("bookshelf spec: OK")

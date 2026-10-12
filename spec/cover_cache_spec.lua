@@ -35,6 +35,7 @@ local first = cache:path{ file_md5 = "stable-id", cover_url = "/covers/a.jpg" }
 local second = cache:path{ file_md5 = "stable-id", cover_url = "/changed/a.jpg" }
 assert(first == second)
 assert(first:match("%.jpg$") ~= nil)
+assert(cache:path{file_md5="stable-id"}==first,"offline identity must resolve cached covers without persisting a remote URL")
 assert(cache:localPath{ file_md5 = "missing", cover_url = "/covers/a.jpg" } == nil)
 
 print("cover cache spec: OK")

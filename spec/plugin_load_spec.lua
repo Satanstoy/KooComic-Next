@@ -212,4 +212,21 @@ scheduled[#scheduled]()
 assert(instance.catalog_probe_running == false, "failed probes must release the running guard")
 assert(not shown[#shown].text:find("private", 1, true))
 
+local cached={{vol_name="Offline original",file_md5="offline"}}
+local cache_shown=false
+instance.settings:account().uin=42
+instance.settings:account().vlibsid="fixture-session"
+instance.library.loadCache=function() return cached end
+instance.bookshelf.show=function(_,books) assert(books==cached);cache_shown=true end
+instance.bookshelf.refresh=function() error("offline opening must not start a network sync") end
+instance.auth.restore=function() error("offline cache must not require live authentication") end
+instance:openBookshelf()
+assert(cache_shown,"the production entry must show cache before asking for a connection")
+local account_options
+require("koobone.ui.account").show=function(options) account_options=options end
+instance.library.items=cached
+instance:showAccount()
+account_options.on_logout()
+assert(#instance.library.items==0,"logout must clear remote in-memory catalog and pending requests")
+
 print("plugin load spec: OK")

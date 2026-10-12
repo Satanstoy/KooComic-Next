@@ -430,6 +430,22 @@ end
 
 function Bookshelf:refresh()
     UIManager:show(InfoMessage:new{ text = "正在刷新书架……", timeout = 1 })
+    local previous_view=self.grid_view
+    local function display(books,err)
+        if previous_view and previous_view.closed then return end
+        if not books then
+            UIManager:show(InfoMessage:new{text="无法加载完整书库，已保留缓存：\n"..tostring(err)})
+            return
+        end
+        local rendered,render_err=pcall(self.show,self,books)
+        if not rendered then UIManager:show(InfoMessage:new{
+            text="生成书架界面时发生错误：\n"..Util.cleanMessage(render_err)}) end
+    end
+    if self.library.refreshAsync then
+        local called,started,err=pcall(self.library.refreshAsync,self.library,display)
+        if not called then display(nil,"无法启动书库同步") elseif not started then display(nil,err) end
+        return
+    end
     UIManager:scheduleIn(0.15, function()
         local request_ok, books, err = pcall(function()
             return self.library:refresh()

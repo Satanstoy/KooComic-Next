@@ -84,7 +84,15 @@ end
 
 function CoverCache:path(item)
     local url = self:url(item)
-    if not url or url == "" then return nil end
+    if not url or url == "" then
+        local key=item and (item.file_md5 or item.vol_id)
+        if not key then return nil end
+        for _,ext in ipairs({"jpg","png","gif","webp"}) do
+            local candidate=ffiUtil.joinPath(self.directory,hash(key).."."..ext)
+            if fileSize(candidate)>0 and looksLikeImage(candidate) then return candidate end
+        end
+        return ffiUtil.joinPath(self.directory,hash(key)..".jpg")
+    end
     local key = item.file_md5 or item.vol_id or url
     return ffiUtil.joinPath(self.directory, hash(key) .. "." .. extension(url))
 end

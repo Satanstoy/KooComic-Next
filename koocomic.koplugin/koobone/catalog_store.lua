@@ -5,28 +5,52 @@ local CatalogEntry = require("koobone.catalog_entry")
 
 local function nativeFilesystem()
     local lfs = require("libs/libkoreader-lfs")
+    local has_util,ffiUtil=pcall(require,"ffi/util")
+    local function safe(path)
+        if path:sub(1,1)~="/" or path:find("[%z\1-\31]") then return false end
+        local current=""
+        for part in path:gmatch("[^/]+") do
+            if part=="." or part==".." then return false end
+            current=current.."/"..part
+            if lfs.symlinkattributes and lfs.symlinkattributes(current,"mode")=="link" then return false end
+            if lfs.attributes(current,"mode")=="file" and (lfs.attributes(current,"nlink") or 1)>1 then return false end
+        end
+        return true
+    end
     return {
         mkdir = function(path)
+            if not safe(path) then return nil,"unsafe cache path" end
             if lfs.attributes(path, "mode") == "directory" then return true end
             return require("util").makePath(path)
         end,
         read = function(path)
+            if not safe(path) then return nil,"unsafe snapshot" end
             local handle, err = io.open(path, "rb")
             if not handle then return nil, err end
-            local content, read_err = handle:read("*a")
+            local content, read_err = handle:read(32*1024*1024+1)
             handle:close()
+            if content and #content>32*1024*1024 then return nil,"snapshot exceeds resource budget" end
             return content, read_err
         end,
         write = function(path, content)
+            if not safe(path) then return nil,"unsafe snapshot temporary path" end
             local handle, err = io.open(path, "wb")
             if not handle then return nil, err end
             local wrote, write_err = handle:write(content)
             local flushed, flush_err = handle:flush()
+            if wrote and flushed and has_util and ffiUtil.fsyncOpenedFile then
+                flushed,flush_err=ffiUtil.fsyncOpenedFile(handle)
+            end
             local closed, close_err = handle:close()
             if not wrote or not flushed or not closed then return nil, write_err or flush_err or close_err end
             return true
         end,
-        rename = os.rename,
+        rename = function(source,target)
+            if not safe(source) or not safe(target) then return nil,"unsafe snapshot commit path" end
+            local ok,err=os.rename(source,target)
+            if ok and has_util and ffiUtil.fsyncDirectory then pcall(ffiUtil.fsyncDirectory,target:match("^(.*)/[^/]+$")) end
+            return ok,err
+        end,
         remove = os.remove,
     }
 end
@@ -82,6 +106,7 @@ local function snapshot(account_id, entries, meta)
         safe[index] = copyScalars(entry, {
             "id", "account_id", "volume_id", "title", "author", "series_title", "series_id",
             "volume_label", "remote_size", "sort_rank",
+            "file_type", "remote_pages", "remote_page",
         })
         safe[index].source = copyScalars(entry.source, { "vol_id", "file_md5" })
     end
@@ -110,6 +135,7 @@ function CatalogStore:commit(account_id, entries, meta)
     local path = self.directory .. "/" .. account_id .. ".json"
     local encoded, content = pcall(self.codec.encode, data)
     if not encoded or type(content) ~= "string" then return nil, "snapshot encode failed" end
+    if #content>32*1024*1024 then return nil,"snapshot exceeds resource budget" end
     local called, ok
     called, ok, err = pcall(self.fs.write, path .. ".tmp", content)
     if called and ok then called, ok, err = pcall(self.fs.rename, path .. ".tmp", path) end
