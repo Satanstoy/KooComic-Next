@@ -3,7 +3,7 @@
 本目录用于保存 AI 辅助开发过程中产生的设计 spec、实现计划和相关设计决策。
 
 - [KooComic Next 原始规格草案](KooComic_Next_SPEC.md)
-- [Bookshelf UI 对齐规格（待评审）](KooComic_Bookshelf_UI_ALIGNMENT_SPEC.md)
+- [Next 工程规格：Bookshelf UI 复用与独立去彩纹](KooComic_Next_ENGINEERING_SPEC.md)
 - [后续已确认的设计决策](../docs/design-review-decisions.md)
 - [架构决策记录](../docs/adr/)
 

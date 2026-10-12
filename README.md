@@ -3,6 +3,8 @@
 本仓库是 [jackchensky/KooComic](https://github.com/jackchensky/KooComic) 的派生开发版，由 [Satanstoy](https://github.com/Satanstoy) 维护，保留上游提交历史、版权声明及 `AGPL-3.0-only` 许可证。2026-10-12 起在上游基础上开发 Next；当前已实现并测试目录基础模块、旧下载路径兼容和只读 limit 探测入口，完整 Next 工作流仍在开发，没有发布派生版安装包。
 
 - [Next 规格草案](doc/KooComic_Next_SPEC.md)
+- [统一工程规格：Bookshelf UI 复用与独立去彩纹](doc/KooComic_Next_ENGINEERING_SPEC.md)
+- [独立预处理首批实现计划](doc/preprocess-implementation-plan.md)
 - [已确认的设计评审决策](docs/design-review-decisions.md)与[架构决策记录](docs/adr/)
 - [领域术语表](CONTEXT.md)
 - [派生仓库维护说明](FORK.md)

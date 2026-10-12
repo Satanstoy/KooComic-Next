@@ -17,6 +17,13 @@
 - 系列 UI、离线启动接入、schema v4、完整同步、非阻塞批量队列和批量删除尚未实现。完整枚举与下载期间可浏览仍是发布门槛。
 - 文件名冲突时是否允许仅为冲突的新文件加短后缀，仍待用户确认；本阶段使用拒绝覆盖的保守行为。
 
+### 独立去彩纹首批实现（2026-10-12）
+
+- 统一工程规格已更名为 `doc/KooComic_Next_ENGINEERING_SPEC.md`，保留 Bookshelf UI 对齐与源码复用要求，新增 PP-01 至 PP-15 独立离线预处理要求。
+- 新增资源协调器、规范化处理身份、手动串行队列及注入式安全提交/恢复事务；按 TDD 观察失败后实现，新增 4 组 Lua specs，总计 20 组。持久化与 worker 均为显式注入契约，尚未接入实际下载器或设备文件后端。
+- 固定引入 Derainbowify/KissFFT 源码与许可证，建立有尺寸、缓冲区长度、索引溢出和内存预算检查的 host 单页原型；6 项原生测试覆盖常量、对角高频、彩色/alpha 保留及非法输入拒绝。构建产物不提交、不进入 Kindle 发布包。
+- 上述测试不证明整本 EPUB 优化已完成。独立设备 worker、图片 codec、EPUB writer、持久化文件适配、启动事务恢复、管理 UI、Kindle ABI 和 Colorsoft A/B/C 画质/性能验收仍待实现或验证；当前未开放预处理执行按钮，也未改变下载成功判定。
+
 详细验证过程及真机步骤见 [`doc/catalog-foundation-validation.md`](doc/catalog-foundation-validation.md)。
 
 ## 1. 项目目标
