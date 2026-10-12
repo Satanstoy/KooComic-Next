@@ -48,4 +48,11 @@ table.remove(original)
 assert(processor:process("source","cancelled",{cancelled=function() return true end}) == nil)
 processor.filter=function() error("codec failure") end
 assert(processor:process("source","failure") == nil and original[5].data=="PNG-original")
+assert(type(processor.validate)=="function","downloaded EPUBs need read-only structural and CRC validation")
+local validator=Epub:new{reader=reader,validation_only=true}
+assert(validator:validate("source") and original[5].data=="PNG-original")
+original[#original+1]={path="../escape",data="bad"}
+assert(not validator:validate("source"))
+table.remove(original)
+assert(not validator:validate("source",{cancelled=function() return true end}))
 print("preprocess EPUB spec: OK")

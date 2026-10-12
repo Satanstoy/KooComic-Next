@@ -35,7 +35,7 @@ local function resolve(base, href)
 end
 
 function Epub:new(options)
-    assert(options.reader and options.writer and options.filter and options.validate_image,"EPUB dependencies required")
+    assert(options.reader and (options.validation_only or (options.writer and options.filter and options.validate_image)),"EPUB dependencies required")
     return setmetatable(options,self)
 end
 
@@ -150,6 +150,23 @@ function Epub:process(source, output, options)
     end
     if not ok then return nil,tostring(result) end
     return result
+end
+
+function Epub:validate(source,options)
+    options=options or {}
+    local reader
+    local ok,err=pcall(function()
+        reader=self.reader();assert(reader:open(source),"cannot open downloaded EPUB")
+        local entries,index=self:_index(reader)
+        self:_manifest(reader,index)
+        for _,entry in ipairs(entries) do
+            assert(not options.cancelled or not options.cancelled(),"cancelled")
+            if entry.mode=="file" then self:_read(reader,entry) end
+        end
+    end)
+    if reader then pcall(reader.close,reader) end
+    if not ok then return nil,tostring(err) end
+    return true
 end
 
 return Epub

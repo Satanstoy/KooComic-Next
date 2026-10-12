@@ -43,6 +43,57 @@ function Files:read(path,limit)
     return data
 end
 
+function Files:prefix(path,length)
+    if type(length)~="number" or length<1 or length>4096 or length~=math.floor(length) or
+            not self:isSafe(path) or lfs.attributes(path,"mode")~="file" then return nil,"unsafe prefix read" end
+    local file,err=io.open(path,"rb")
+    if not file then return nil,err end
+    local data,read_error=file:read(length);file:close()
+    return data,read_error
+end
+
+function Files:exclusiveWriter(path)
+    if not self:isSafe(path) then return nil,"unsafe exclusive output" end
+    local ffi=require("ffi")
+    if ffi.os~="Linux" then return nil,"exclusive output unavailable" end
+    ffi.cdef[[int openat(int, const char *, int, ...);]]
+    local C=ffi.C
+    local directory_flag=ffi.arch=="arm" and 16384 or 65536
+    local nofollow=ffi.arch=="arm" and 32768 or 131072
+    local directory_flags=C.O_RDONLY+C.O_CLOEXEC+directory_flag+nofollow
+    local parent=C.open("/",directory_flags)
+    if parent<0 then return nil,"cannot anchor output directory" end
+    local parts={};for component in path:gmatch("[^/]+") do parts[#parts+1]=component end
+    for index=1,#parts-1 do
+        local next_fd=C.openat(parent,parts[index],directory_flags)
+        C.close(parent)
+        if next_fd<0 then return nil,"unsafe output ancestor" end
+        parent=next_fd
+    end
+    local fd=C.openat(parent,parts[#parts],C.O_WRONLY+C.O_CREAT+C.O_CLOEXEC+128+nofollow,ffi.cast("int",384))
+    C.close(parent)
+    if fd<0 then return nil,"output exists or cannot be created" end
+    local owner=ffi.gc(ffi.new("int[1]",fd),function(value) if value[0]>=0 then C.close(value[0]) end end)
+    return {
+        write=function(_,data)
+            if owner[0]<0 then return nil,"output is closed" end
+            local offset=0
+            while offset<#data do
+                local count=tonumber(C.write(owner[0],ffi.cast("const char*",data)+offset,#data-offset))
+                if count and count>0 then offset=offset+count
+                elseif ffi.errno()~=C.EINTR then return nil,"exclusive output write failed" end
+            end
+            return true
+        end,
+        close=function()
+            if owner[0]<0 then return nil,"output is closed" end
+            local current=owner[0];owner[0]=-1
+            if C.close(current)~=0 then return nil,"exclusive output close failed" end
+            return true
+        end,
+    }
+end
+
 function Files:write(path,data)
     if not self:isSafe(path) then return nil,"unsafe output" end
     local file,err=io.open(path,"wb")

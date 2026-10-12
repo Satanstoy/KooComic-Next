@@ -105,3 +105,11 @@ UI验收覆盖600×800、758×1024及其横屏、普通/大字号、长中英文
 33组Lua回归通过。官方KOReader实际原子文件保存/重建队列、无签名地址/会话、写入预算、符号/硬链接拒绝通过；worker采用可控异步fixture，仅证明队列契约，不证明下载/EPUB网络链路。D1.2真实worker、D1.3生产入口仍待实现，R2-07/08/09/10不能标为整体完成。
 
 相关约束：[统一工程规格](KooComic_Next_ENGINEERING_SPEC.md)、[原始归档](KooComic_Next_SPEC.md)、[项目状态](../PROJECT_STATUS.md)。
+
+### D1.2a独立传输证据
+
+DownloadTransport复用AsyncTask实际独立进程，执行注入的签名解析和生产Api下载，仅返回校验后的.part、字节和SHA，不保存签名地址、不提交最终EPUB。共享EPUB解析新增只读验证，核对ZIP头、结构/manifest/spine与全部资源CRC/大小。已有.part拒写，使用从/逐级openat锚定且不跟随链接的排他fd，Api消耗fd而不重新按路径打开，避免检查/创建之间覆盖外部文件。
+
+34组Lua回归及官方runtime实际localhost HTTP传输生成EPUB、HTML拒绝、立即取消和worker回收通过；native文件测试验证既有文件/链接不会被截断。原有真实处理EPUB集成仍通过。本机SDK头确认ARM排他/no-follow标志；并不证明Colorsoft openat动态ABI已验收。
+
+仍未接main、真实账号签名解析、进度UI、空间预估、自动重试或主进程账号/占用复核和原子提交。返回committed=false，不能直接给Queue判为completed；D1.2b与D1.3仍是下一单位。取消/失败.part保留，但未开放带归属校验的部分文件重试。
