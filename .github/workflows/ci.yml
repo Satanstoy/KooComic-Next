@@ -64,6 +64,7 @@ jobs:
           tar -xf /tmp/koreader.tar.xz -C /tmp/koreader-runtime
           cd /tmp/koreader-runtime/lib/koreader
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_epub_integration.lua" "$GITHUB_WORKSPACE" /tmp/koocomic-epub-test
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_file_faults_integration.lua" "$GITHUB_WORKSPACE"
           SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-components ./luajit "$GITHUB_WORKSPACE/spec/koreader_bookshelf_components_integration.lua" "$GITHUB_WORKSPACE"
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_catalog_integration.lua" "$GITHUB_WORKSPACE"
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_local_manager_integration.lua" "$GITHUB_WORKSPACE"

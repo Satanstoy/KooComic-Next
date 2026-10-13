@@ -12,9 +12,24 @@ Worker.__index=Worker
 function Worker:new(options)
     return setmetatable({files=assert(options.files),directory=assert(options.directory),
         native_library=assert(options.native_library),memory_budget=options.memory_budget or 384*1024*1024,
+        space=options.space,reserve=options.reserve or 64*1024*1024,
         is_in_use=assert(options.is_in_use),schedule=options.schedule or function(delay,callback)
             require("ui/uimanager"):scheduleIn(delay,callback)
         end},self)
+end
+
+function Worker:hasSpace(source)
+    local fs=self.files:transactionFS()
+    local called,size=pcall(fs.size,source)
+    if not called or type(size)~="number" or size~=size or size<=0 or size==math.huge then return nil,"source size unavailable" end
+    local required=size*2+self.reserve
+    for _,path in ipairs({source,self.directory}) do
+        local called,free=pcall(self.space or fs.free_space,path)
+        if not called or type(free)~="number" or free~=free or free==math.huge or free<required then
+            return nil,"temporary space insufficient or unknown"
+        end
+    end
+    return true
 end
 
 function Worker:paths(job)
@@ -31,6 +46,8 @@ function Worker:start(job,events)
     if type(job.source_fingerprint)~="string" or not job.source_fingerprint:match("^%x+$") or #job.source_fingerprint~=64 then
         return nil,"SHA-256 source identity required"
     end
+    local enough,space_error=self:hasSpace(job.source_path)
+    if not enough then return nil,space_error end
     local paths=self:paths(job)
     if not self.files:isSafe(paths.temporary) or not self.files:isSafe(paths.backup) or self.files:exists(paths.temporary) then
         return nil,"unsafe or existing temporary EPUB"
@@ -118,6 +135,7 @@ function Worker:start(job,events)
     local cancellation=false
     local committing=false
     local commit_applied=false
+    local committed_result
     local handle={pid=pid,cancel=function()
         if commit_applied then return false,"already committed" end
         cancellation=true
@@ -138,15 +156,17 @@ function Worker:start(job,events)
                 if acknowledged then return end
                 local applied=false
                 if source_hash==expected_source and guard() then
-                    applied=self.files:rename(paths.temporary,job.source_path,true)==true
+                    local renamed,warning=self.files:rename(paths.temporary,job.source_path,true)
+                    applied=renamed==true
+                    if applied then committed_result={validated=true,committed=true,
+                        output_fingerprint=state.output_fingerprint,backup_path=paths.backup,
+                        warning_code=warning and "durability_unconfirmed" or nil} end
                 end
                 commit_applied=applied
                 local saved=self.files:writeJSON(paths.permission,{applied=applied})
                 if not saved then
                     Util.terminateSubProcess(pid)
-                    acknowledged=true
-                    events.done(applied,applied and {validated=true,committed=true,
-                        output_fingerprint=state.output_fingerprint,backup_path=paths.backup} or nil)
+                    if committed_result then committed_result.warning_code=committed_result.warning_code or "worker_result_missing" end
                 end
             end)
         end)
@@ -164,7 +184,10 @@ function Worker:start(job,events)
         end
         if Util.isSubProcessDone(pid) then
             acknowledged=true
-            if state and state.state=="completed" then events.stage("validating");events.done(true,state.result)
+            if commit_applied then
+                if not state or state.state~="completed" then committed_result.warning_code=committed_result.warning_code or "worker_result_missing" end
+                events.stage("validating");events.done(true,committed_result)
+            elseif state and state.state=="completed" then events.stage("validating");events.done(true,state.result)
             else events.done(false,state and state.error or "worker exited without a result") end
             return
         end

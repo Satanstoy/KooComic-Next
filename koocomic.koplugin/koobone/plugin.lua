@@ -53,8 +53,8 @@ function KooComic:init()
     self.preprocess = PreprocessService:get{storage=self.storage,
         profile_provider=function() return self.settings.data.preprocess end,
         on_batch=function(result)
-            UIManager:show(InfoMessage:new{text=string.format("去彩纹完成 %d，已优化跳过 %d，失败 %d，取消 %d，其他跳过 %d。",
-                result.completed,result.optimized,result.failed,result.cancelled,result.skipped)})
+            UIManager:show(InfoMessage:new{text=string.format("去彩纹完成 %d，已优化跳过 %d，失败 %d，取消 %d，其他跳过 %d，需核对 %d。",
+                result.completed,result.optimized,result.failed,result.cancelled,result.skipped,result.warnings or 0)})
         end,
         directory=settings_dir.."/koocomic-preprocess"}
     self.storage.preprocess = self.preprocess

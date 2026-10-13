@@ -2,6 +2,7 @@
 local Identity = require("koobone.preprocess_identity")
 local Queue = {}
 Queue.__index = Queue
+local warnings={durability_unconfirmed=true,worker_result_missing=true}
 
 local function counter(value)
     return type(value) == "number" and value >= 0 and value < math.huge and value == math.floor(value)
@@ -80,6 +81,7 @@ function Queue:tick()
         if not ok and not active.cancel_requested then job.error = "worker failed" end
         if ok and type(result) == "table" and type(result.output_fingerprint) == "string" then
             job.output_fingerprint = result.output_fingerprint
+            job.warning_code=warnings[result.warning_code] and result.warning_code or nil
         end
         self.active = nil
         self.coordinator:release(token)
@@ -112,7 +114,7 @@ function Queue:retry(id, output_invalidated)
     for index, job in ipairs(self.jobs) do
         if job.id == id and (job.state == "failed" or job.state == "cancelled" or
                 (job.state == "completed" and output_invalidated == true)) then
-            job.state, job.error, job.output_fingerprint = "pending", nil, nil
+            job.state, job.error, job.output_fingerprint,job.warning_code = "pending", nil, nil,nil
             job.processed_pages, job.total_pages = 0, nil
             table.remove(self.jobs,index)
             self.jobs[#self.jobs+1]=job
@@ -141,6 +143,7 @@ function Queue:restore(snapshot)
                 not counter(value.processed_pages) or
                 (value.total_pages ~= nil and (not counter(value.total_pages) or value.total_pages < value.processed_pages)) or
                 (value.error ~= nil and type(value.error) ~= "string") or
+                (value.warning_code~=nil and not warnings[value.warning_code]) or
                 (value.output_fingerprint ~= nil and type(value.output_fingerprint) ~= "string") or
                 (value.state == "completed" and (type(value.output_fingerprint) ~= "string" or value.output_fingerprint == "")) then
             return nil, "invalid job"
@@ -148,7 +151,7 @@ function Queue:restore(snapshot)
         seen[value.id] = true
         local job = {}
         for _, field in ipairs({ "id", "state", "book_id", "source_path", "source_fingerprint", "algorithm_version",
-                "profile", "processed_pages", "total_pages", "error", "output_fingerprint" }) do
+                "profile", "processed_pages", "total_pages", "error", "output_fingerprint","warning_code" }) do
             job[field] = copy(value[field])
         end
         if job.state == "preparing" or job.state == "processing" or job.state == "validating" then

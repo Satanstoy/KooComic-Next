@@ -23,6 +23,7 @@ assert(not service:submitBatch({{file_md5="three"}}) and #service.requests==2 an
 service.requests[1].state="skipped";service.requests[2].state="failed"
 local result=service:batchSummary()
 assert(result.optimized==1 and result.failed==1 and result.skipped==3 and result.pending==0)
+assert(result.warnings==0,"batch summaries must report durability/result warnings separately from failures")
 fail_save=false
 local tasks={}
 service.schedule=function(_,callback) tasks[#tasks+1]=callback end

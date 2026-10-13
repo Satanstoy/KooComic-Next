@@ -25,7 +25,9 @@ function Store:save(snapshot)
     if not created then return nil,err end
     local written,write_error=self.files:write(self.path..".tmp",data)
     if not written then return nil,write_error end
-    return self.files:rename(self.path..".tmp",self.path)
+    local applied,warning=self.files:rename(self.path..".tmp",self.path)
+    if applied and warning then return nil,warning end
+    return applied,warning
 end
 
 function Store:load()

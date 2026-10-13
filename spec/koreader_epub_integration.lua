@@ -391,4 +391,55 @@ while #callbacks>0 do table.remove(callbacks,1)() end
 assert(result.success==1 and result.failed==0 and result.files_removed==1,
     "processed EPUB deletion must tolerate absent worker temporary files and finish cleanup")
 assert(not files:exists(source) and not files:exists(backup) and not records[real_storage:itemKey(item)])
+for _,fault in ipairs({"prepared_journal","rename_denied","directory_sync","committed_journal","death_after_commit","permission_journal"}) do
+    local fault_source=directory.."/fault-"..fault..".epub"
+    assert(files:copy(worker_result.backup_path,fault_source))
+    assert(files:mkdir(fault_source..".sdr"));assert(files:write(fault_source..".sdr/metadata.lua","sidecar sentinel"))
+    local fault_files=Files:new{roots={directory}}
+    local job={id="fault-"..fault,source_path=fault_source,source_fingerprint=fingerprint,profile={strength=0.8,discard_original=true}}
+    local timers,done,result,success,handle={},false,nil,nil,nil
+    local worker=Worker:new{files=fault_files,directory=directory.."/fault-worker-"..fault,
+        native_library=root.."/native/preprocess/build/moire-host.so",is_in_use=function() return false end,
+        schedule=function(_,callback) timers[#timers+1]=callback end}
+    local paths=worker:paths(job)
+    local write_json=fault_files.writeJSON
+    fault_files.writeJSON=function(self,path,value)
+        if fault=="permission_journal" and path==paths.permission then return nil,"injected permission checkpoint failure" end
+        if path==paths.journal and ((fault=="prepared_journal" and value.state=="prepared") or
+                (fault=="committed_journal" and value.state=="committed")) then return nil,"injected journal failure" end
+        return write_json(self,path,value)
+    end
+    local rename=fault_files.rename
+    fault_files.rename=function(self,from,to,...)
+        if to~=fault_source then return rename(self,from,to,...) end
+        if fault=="rename_denied" then return nil,"injected EACCES" end
+        local util=require("ffi/util");local sync=util.fsyncDirectory
+        if fault=="directory_sync" then util.fsyncDirectory=function() return nil,"injected sync failure" end end
+        local ok,err=rename(self,from,to,...);util.fsyncDirectory=sync
+        if fault=="death_after_commit" and ok then util.terminateSubProcess(handle.pid) end
+        return ok,err
+    end
+    handle=assert(worker:start(job,{stage=function() end,progress=function() end,
+        done=function(ok,value)
+            if fault=="permission_journal" then
+                local status=ffi.new("int[1]")
+                assert(ffi.C.waitpid(handle.pid,status,1)==-1 and ffi.errno()==10,
+                    "terminal callback must run after the killed worker was reaped")
+            end
+            done=true;success=ok;result=value
+        end}))
+    for _=1,500 do
+        if done then break end
+        local callbacks=timers;timers={};for _,callback in ipairs(callbacks) do callback() end
+        ffi.C.usleep(10000)
+    end
+    assert(done,"fault worker must be reaped: "..fault)
+    local applied=fault=="directory_sync" or fault=="committed_journal" or fault=="death_after_commit" or fault=="permission_journal"
+    assert(success==applied,"parent's actual commit must decide the result after "..fault)
+    if applied then
+        assert(result.committed and result.validated and files:hash(fault_source)==result.output_fingerprint and
+            result.warning_code,"applied output must remain readable with a persisted warning")
+    else assert(files:hash(fault_source)==fingerprint,"precommit failure must preserve original bytes") end
+    assert(not files:exists(paths.backup) and files:read(fault_source..".sdr/metadata.lua")=="sidecar sentinel")
+end
 print("KOReader real EPUB integration: OK")

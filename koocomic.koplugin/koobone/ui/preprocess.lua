@@ -8,6 +8,8 @@ local PreprocessUI={}
 local managers=setmetatable({},{__mode="k"})
 local names={pending="等待",preparing="校验源文件",processing="处理中",validating="校验结果",
     completed="完成",failed="失败",cancelled="已取消",skipped="已优化跳过"}
+local warnings={durability_unconfirmed="文件已替换，目录同步失败，耐久性需核对。",
+    worker_result_missing="文件已替换且指纹通过，worker结果日志不完整，需核对。"}
 
 local function report(ok,err)
     if not ok then UIManager:show(InfoMessage:new{text=tostring(err or "操作失败")}) end
@@ -70,7 +72,7 @@ function PreprocessUI.show(storage,service,options)
         for _, job in ipairs(service:jobs()) do
             local value=job
             local title=value.source_path:match("([^/]+)$") or value.book_id
-            result[#result+1]={text=title,mandatory=names[value.state] or value.state,
+            result[#result+1]={text=title,mandatory=(names[value.state] or value.state)..(value.warning_code and " / 需核对" or ""),
                 post_text=value.total_pages and (tostring(value.processed_pages or 0).." / "..value.total_pages) or nil,
                 callback=function()
                     local dialog
@@ -86,6 +88,9 @@ function PreprocessUI.show(storage,service,options)
                             callback=function() local ok,err=service:retry(value.id);report(ok,err);if ok then report(service:resume()) end;UIManager:close(dialog) end}},
                         {{text="查看错误",enabled=value.error~=nil,callback=function()
                             UIManager:show(InfoMessage:new{text=tostring(value.error or "无错误")})
+                        end}},
+                        {{text="查看提示",enabled=warnings[value.warning_code]~=nil,callback=function()
+                            UIManager:show(InfoMessage:new{text=warnings[value.warning_code] or "无提示"})
                         end}},
                         {{text="关闭",callback=function() UIManager:close(dialog) end}},
                     }}

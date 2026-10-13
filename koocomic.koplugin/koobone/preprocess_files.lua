@@ -286,7 +286,8 @@ function Files:rename(source,target,already_synced)
     end
     local ok,err=os.rename(source,target)
     if not ok then return nil,err end
-    return Util.fsyncDirectory(target)
+    if not Util.fsyncDirectory(target) then return true,"file applied; directory durability unconfirmed" end
+    return true
 end
 
 function Files:exists(path) return lfs.symlinkattributes(path,"mode")~=nil end
@@ -335,7 +336,9 @@ function Files:writeJSON(path,value)
     if not encoded then return nil,"JSON encoding failed" end
     local ok,err=self:write(path..".tmp",data)
     if not ok then return nil,err end
-    return self:rename(path..".tmp",path)
+    local applied,warning=self:rename(path..".tmp",path)
+    if applied and warning then return nil,warning end
+    return applied,warning
 end
 
 function Files:readJSON(path)
@@ -387,7 +390,7 @@ function Files:transactionFS()
     return {fingerprint=function(path) return self:hash(path) end,
         copy=function(source,target) return self:copy(source,target) end,
         rename=function(source,target) return self:rename(source,target) end,
-        size=function(path) return tonumber(lfs.attributes(path,"size")) end,
+        size=function(path) local size=lfs.attributes(path,"size");return tonumber(size) end,
         free_space=function(path) return require("util").diskUsage(Util.dirname(path)).available end}
 end
 

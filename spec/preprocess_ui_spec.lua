@@ -36,4 +36,7 @@ local queue=require("koobone.ui.preprocess").show(storage,service,{queue_only=tr
 queue.item_table[4].callback();shown[#shown].buttons[1][1].callback()
 assert(not cancelled and shown[#shown].ok_callback,"running processing cancellation must require confirmation")
 shown[#shown].ok_callback();assert(cancelled)
+service.jobs=function() return {{id="complete",source_path="/books/book.epub",state="completed",warning_code="durability_unconfirmed"}} end
+queue=require("koobone.ui.preprocess").show(storage,service,{queue_only=true})
+assert(queue.item_table[4].mandatory:find("需核对",1,true),"applied-output warnings must be visible in the native queue")
 print("preprocess UI spec: OK")

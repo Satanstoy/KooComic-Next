@@ -63,7 +63,7 @@ function Service:new(options)
         self.state_path=directory.."/tasks.json"
         require("koobone.preprocess_koreader"):new{native_library=native,workspace=directory}
         self.worker=Worker:new{files=self.files,directory=directory,native_library=native,
-            is_in_use=self.is_in_use,schedule=self.schedule}
+            is_in_use=self.is_in_use,schedule=self.schedule,space=self.space,reserve=self.reserve}
         self.queue=Queue:new{coordinator=self.coordinator,worker=self.worker,checkpoint=function(snapshot)
             return self:_save(snapshot)
         end}
@@ -274,7 +274,7 @@ function Service:submitBatch(items,expected_profile)
 end
 
 function Service:batchSummary()
-    local result={completed=0,optimized=0,failed=0,cancelled=0,pending=0,skipped=0}
+    local result={completed=0,optimized=0,failed=0,cancelled=0,pending=0,skipped=0,warnings=0}
     if not self.batch then return result end
     local jobs,requests={},{}
     for _,job in ipairs(self.queue.jobs) do jobs[job.id]=job end
@@ -284,7 +284,9 @@ function Service:batchSummary()
         local state
         if member.job_id and jobs[member.job_id] then state=jobs[member.job_id].state end
         if not state and requests[member.request_id] then state=requests[member.request_id].state end
-        if state=="completed" then result.completed=result.completed+1
+        if state=="completed" then
+            result.completed=result.completed+1
+            if jobs[member.job_id] and jobs[member.job_id].warning_code then result.warnings=result.warnings+1 end
         elseif state=="skipped" then result.optimized=result.optimized+1
         elseif state=="failed" or not state then result.failed=result.failed+1
         elseif state=="cancelled" then result.cancelled=result.cancelled+1
@@ -305,6 +307,8 @@ function Service:submit(item)
     for _, request in ipairs(self.requests) do
         if request.source_path==path and (request.state=="pending" or request.state=="preparing") then return nil,"已排队" end
     end
+    local enough=self.worker:hasSpace(path)
+    if not enough then return nil,"临时空间不足或无法确认" end
     local request={id=self.next_id,book_id=tostring(self.storage:itemKey(item)),source_path=path,state="pending",profile=profile}
     self.next_id=self.next_id+1;self.requests[#self.requests+1]=request
     local saved,save_error=self:_save()

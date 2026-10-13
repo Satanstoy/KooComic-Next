@@ -20,4 +20,6 @@ assert(not store:save{account_id="one",size=101} and files[store.path]==previous
 assert(not store:save{account_id="other"},"wrong-account snapshots must not overwrite this store")
 local other=Store:new{directory="/private/queue",account_id="two",files=fs,codec=codec,hash=function(value) return "hash-"..value end}
 assert(other.path~=store.path)
+fs.rename=function(_,from,to) files[to],files[from]=files[from],nil;return true,"durability unconfirmed" end
+assert(not store:save{account_id="one",size=30},"an applied but nondurable queue checkpoint must not authorize a worker")
 print("download queue store spec: OK")
