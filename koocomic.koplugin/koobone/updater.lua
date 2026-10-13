@@ -222,12 +222,6 @@ end
 function Updater:_extractPackage(archive_path, stage_path)
     local files=require("koobone.preprocess_files"):new{roots={stage_path}}
     local reader=Archiver.Reader:new()
-    local ffi=require("ffi")
-    local archive=ffi.loadlib("archive","13")
-    -- libarchive reports ZIP CRC at resource EOF, beyond the declared-length read.
-    reader.verifyEnd=function(value)
-        return tonumber(archive.archive_read_data(value.archive,ffi.new("uint8_t[1]"),1))==0
-    end
     return require("koobone.update_package"):new{reader=reader,files=files}:extract(archive_path,stage_path)
 end
 

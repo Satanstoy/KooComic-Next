@@ -8,7 +8,7 @@ local original = {{path="mimetype",data="application/epub+zip"},
     {path="OPS/chapter.xhtml",data="<html><img src='images/p.png'/></html>"},
     {path="OPS/images/p.png",data="PNG-original"}}
 local archives = {source=original}
-local processed, progress = 0, 0
+local processed, progress,crc_ok = 0, 0,true
 local function reader()
     return {open=function(self,path) self.files=archives[path];self.entries={};return self.files~=nil end,
         iterate=function(self)
@@ -20,7 +20,7 @@ local function reader()
             end
         end,
         extractToMemory=function(self,path) for _, item in ipairs(self.files) do if item.path==path then return item.data end end end,
-        close=function() end}
+        verifyEnd=function() return crc_ok end,close=function() end}
 end
 local processor = Epub:new{reader=reader, writer=function()
     local output
@@ -51,6 +51,12 @@ assert(processor:process("source","failure") == nil and original[5].data=="PNG-o
 assert(type(processor.validate)=="function","downloaded EPUBs need read-only structural and CRC validation")
 local validator=Epub:new{reader=reader,validation_only=true}
 assert(validator:validate("source") and original[5].data=="PNG-original")
+crc_ok=false
+assert(not validator:validate("source"),"download validation must reject resource EOF/CRC failures")
+processor.filter=function(data) processed=processed+1;return data end
+local prior=processed
+assert(not processor:process("source","crc-rejected") and processed==prior,"processing must reject CRC before filtering resources")
+crc_ok=true
 original[#original+1]={path="../escape",data="bad"}
 assert(not validator:validate("source"))
 table.remove(original)

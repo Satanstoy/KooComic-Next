@@ -1,5 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 local Package={}
+local Resource=require("koobone.archive_resource")
 Package.__index=Package
 function Package:new(options)
     return setmetatable({reader=assert(options.reader),files=assert(options.files),
@@ -37,8 +38,8 @@ function Package:extract(archive,stage)
             if entry.mode=="directory" then
                 if not files:mkdir(target) then return nil,"无法创建更新目录" end
             else
-                local data=reader:extractToMemory(entry.path)
-                if type(data)~="string" or #data~=size or reader.err or (reader.verifyEnd and not reader:verifyEnd()) then
+                local data=Resource.read(reader,entry)
+                if not data then
                     return nil,"更新资源损坏或截断"
                 end
                 if not files:mkdir(target:match("^(.*)/[^/]+$")) then return nil,"无法创建更新目录" end

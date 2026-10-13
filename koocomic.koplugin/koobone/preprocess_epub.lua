@@ -1,5 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 local Xml = require("koobone.vendor.xml")
+local Resource = require("koobone.archive_resource")
 local Epub = {}
 Epub.__index = Epub
 
@@ -58,9 +59,7 @@ end
 
 function Epub:_read(reader, entry)
     assert(entry and entry.mode=="file","missing EPUB resource")
-    local data=reader:extractToMemory(entry.path)
-    assert(type(data)=="string" and #data==tonumber(entry.size) and not reader.err,"ZIP data/CRC validation failed")
-    return data
+    return assert(Resource.read(reader,entry))
 end
 
 function Epub:_manifest(reader, by_path)

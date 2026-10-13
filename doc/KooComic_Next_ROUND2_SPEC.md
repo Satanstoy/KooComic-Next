@@ -163,6 +163,16 @@ Next使用Satanstoy/KooComic-Next发行前缀及自己的Pages清单地址。
 与当前打包产物的严格解包通过；独立review通过。这不代表事务安装/回滚完成。
 review同时发现共享EPUB读取可能存在同类EOF CRC遗漏，须在R2-14另补故障测试。
 
+### R2-14共享ZIP CRC修复证据
+
+新增共用ArchiveResource读取器，更新包、下载EPUB只读验证及去彩纹读写验证
+均在声明长度读取后检查实际资源EOF/CRC，不仅信任返回长度和reader.err。
+纯EPUB故障测试先失败再通过；官方runtime生成stored ZIP，篡改chapter资源
+且保持长度不变后，只读验证与预处理均以CRC拒绝，输入原样不变。
+
+44组Lua回归、实际PNG/JPEG/20卷混合处理、40次实际HTTP提交以及更新包
+CRC回归通过。仍不将这些资源故障测试等同于Colorsoft断电/权限/内存/画质验收。
+
 ### R2-12 v4迁移软件证据
 
 v1平铺、v2/v3嵌套和新安装迁移至v4，保留原下载目录、记录、账号选择及UI。
