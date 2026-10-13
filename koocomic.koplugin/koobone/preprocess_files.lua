@@ -115,6 +115,81 @@ function Files:identity(path)
     return tostring(stat.dev)..":"..tostring(stat.ino)
 end
 
+
+local function renameDirectories(self,source,target,exchange)
+    if not self:isSafe(source) or not self:isSafe(target) or lfs.symlinkattributes(source,"mode")~="directory" or
+            (exchange and lfs.symlinkattributes(target,"mode")~="directory") then return nil,"unsafe update directories" end
+    local parent,name,_,ffi=openParent(source)
+    if not parent then return nil,name end
+    local target_parent,target_name=openParent(target)
+    if not target_parent then ffi.C.close(parent);return nil,target_name end
+    local number=({x64=316,arm=382,arm64=276})[ffi.arch]
+    if not number then ffi.C.close(parent);ffi.C.close(target_parent);return nil,"atomic directory exchange unavailable" end
+    local status=ffi.C.syscall(ffi.cast("long",number),ffi.cast("int",parent),ffi.cast("const char*",name),
+        ffi.cast("int",target_parent),ffi.cast("const char*",target_name),ffi.cast("unsigned int",exchange and 2 or 1))
+    local synced=status==0 and ffi.C.fsync(parent)==0 and ffi.C.fsync(target_parent)==0
+    ffi.C.close(parent);ffi.C.close(target_parent)
+    if status~=0 then return nil,"atomic directory operation unavailable or destination conflict" end
+    return true,not synced and "directory sync failed" or nil
+end
+function Files:exchangeDirectories(source,target) return renameDirectories(self,source,target,true) end
+function Files:moveDirectoryNoReplace(source,target) return renameDirectories(self,source,target,false) end
+
+function Files:removeDirectorySecure(path,expected)
+    if not self:isSafe(path) then return nil,"unsafe directory cleanup" end
+    local parent,name,nofollow,ffi=openParent(path)
+    if not parent then return nil,name end
+    ffi.cdef[[int unlinkat(int, const char *, int);]]
+    local C=ffi.C
+    local flags=C.O_RDONLY+C.O_CLOEXEC+nofollow+(ffi.arch=="arm" and 16384 or 65536)
+    local root=C.openat(parent,name,flags)
+    if root<0 then C.close(parent);return nil,"cannot anchor cleanup directory" end
+    local stat=lfs.attributes("/proc/self/fd/"..tonumber(root))
+    local root_id=stat and tostring(stat.dev)..":"..tostring(stat.ino)
+    if root_id~=expected then C.close(root);C.close(parent);return nil,"cleanup ownership changed" end
+    local entries=0
+    local function walk(fd,depth,remove)
+        if depth>64 then return nil,"cleanup depth budget" end
+        local prefix="/proc/self/fd/"..tonumber(fd)
+        local iterator,object=lfs.dir(prefix)
+        local function visit()
+            for child in iterator,object do
+                if child~="." and child~=".." then
+                    entries=entries+1;if entries>10000 then return nil,"cleanup entry budget" end
+                    local value=lfs.symlinkattributes(prefix.."/"..child)
+                    if not value or (value.mode~="file" and value.mode~="directory") or
+                            (value.mode=="file" and (value.nlink or 1)~=1) then return nil,"unsafe cleanup descendant" end
+                    if value.mode=="directory" then
+                        local next_fd=C.openat(fd,child,flags)
+                        if next_fd<0 then return nil,"cleanup directory changed" end
+                        local called,ok,err=pcall(walk,next_fd,depth+1,remove)
+                        C.close(next_fd)
+                        if not called or not ok then return nil,err or "cleanup traversal failed" end
+                    end
+                    if remove and C.unlinkat(fd,child,value.mode=="directory" and 512 or 0)~=0 then
+                        return nil,"cleanup unlink failed"
+                    end
+                end
+            end
+            return true
+        end
+        local called,ok,err=pcall(visit)
+        pcall(function() object:close() end)
+        if not called then return nil,"cleanup traversal failed" end
+        return ok,err
+    end
+    local ok,err=walk(root,0,false)
+    if ok then entries=0;ok,err=walk(root,0,true) end
+    C.close(root)
+    if ok then
+        local current=lfs.symlinkattributes(path)
+        if not current or tostring(current.dev)..":"..tostring(current.ino)~=expected or C.unlinkat(parent,name,512)~=0 then
+            ok,err=nil,"cleanup root changed"
+        elseif C.fsync(parent)~=0 then ok,err=nil,"cleanup directory sync failed" end
+    end
+    C.close(parent)
+    return ok,err
+end
 function Files:copyExclusive(source,target,expected,max_bytes,on_created)
     if not self:isSafe(source) or not self:isSafe(target) then return nil,"unsafe capture" end
     local parent,name,nofollow,ffi=openParent(source)
