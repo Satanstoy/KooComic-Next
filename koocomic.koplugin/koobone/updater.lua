@@ -220,33 +220,15 @@ function Updater:resetPromptPolicy()
 end
 
 function Updater:_extractPackage(archive_path, stage_path)
-    local reader = Archiver.Reader:new()
-    if not reader:open(archive_path) then
-        reader:close()
-        return nil, reader.err or "无法打开更新包"
+    local files=require("koobone.preprocess_files"):new{roots={stage_path}}
+    local reader=Archiver.Reader:new()
+    local ffi=require("ffi")
+    local archive=ffi.loadlib("archive","13")
+    -- libarchive reports ZIP CRC at resource EOF, beyond the declared-length read.
+    reader.verifyEnd=function(value)
+        return tonumber(archive.archive_read_data(value.archive,ffi.new("uint8_t[1]"),1))==0
     end
-    local ok, err = true, nil
-    for entry in reader:iterate() do
-        local path = entry.path
-        local safe = type(path) == "string" and path ~= ""
-            and path:sub(1, 1) ~= "/"
-            and path:find("\\", 1, true) == nil
-            and path:match("^koocomic%.koplugin/") ~= nil
-            and path:match("^%.%./") == nil
-            and path:match("/%.%./") == nil
-            and path:match("/%.%.$") == nil
-        if not safe then
-            ok, err = nil, "更新包包含不安全路径"
-            break
-        end
-        if not reader:extractToPath(path, stage_path .. "/" .. path) then
-            ok, err = nil, reader.err or "解压更新包失败"
-            break
-        end
-    end
-    if reader.err then ok, err = nil, reader.err end
-    reader:close()
-    return ok, err
+    return require("koobone.update_package"):new{reader=reader,files=files}:extract(archive_path,stage_path)
 end
 
 function Updater:install(release, on_progress)
