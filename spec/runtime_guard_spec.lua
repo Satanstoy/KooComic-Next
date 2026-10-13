@@ -13,7 +13,12 @@ local writes=0
 service.files={writeJSON=function() writes=writes+1;return true end}
 service.queue={jobs={},snapshot=function() return {} end}
 local old_confirmation=function() return service:submitBatch({{file_md5="original"}}) end
+local Settings=require("koobone.settings")
+local settings=Settings:new("/settings/fixture.lua",nil,{persistence={load=function() return nil end,
+    save=function() writes=writes+1;return true end}})
+writes=0
 Guard.block()
+assert(not settings:flush() and writes==0,"stale settings controls must not overwrite restored configuration")
 assert(not old_confirmation() and writes==0 and #service.requests==0,
     "a retained preprocessing confirmation must not enqueue or persist anything after code replacement")
 assert(not service:resume() and not service.running)

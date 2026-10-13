@@ -1,6 +1,25 @@
 require("setupkoenv")
 local root=assert(arg[1]);package.path=root.."/koocomic.koplugin/?.lua;"..package.path
 local package_path=assert(arg[2])
+if arg[3] then
+    local directory=assert(arg[4])
+    package.path=directory.."/koocomic.koplugin/?.lua;"..package.path
+    local files=require("koobone.preprocess_files"):new{roots={directory,package_path:match("^(.*)/[^/]+$")}}
+    local settings=require("koobone.settings"):new(directory.."/settings.lua")
+    local bytes=assert(files:read(package_path,15*1024*1024))
+    local api={download=function(_,_,_,options) assert(options.handle:write(bytes));assert(options.handle:close());return true end}
+    local updater=require("koobone.updater"):new{settings=settings,api=api,
+        current_version=arg[3]=="confirm-rollback" and "0.4.1" or "0.4.0",plugin_dir=directory.."/koocomic.koplugin",
+        manifest_url="https://example.test/update.json",release_prefix="https://example.test/releases/"}
+    if arg[3]=="confirm-rollback" then
+        assert(updater:confirmInstalledUpdate() and updater:canRollback())
+        assert(updater:rollbackUpdate())
+    else
+        assert(updater:install{product_id="koocomic-next",version="0.4.1",size=#bytes,sha256=assert(files:hash(package_path)),
+            package_url="https://example.test/releases/v0.4.1/package.zip"})
+    end
+    return
+end
 local Files=require("koobone.preprocess_files")
 local ffi=require("ffi")
 G_defaults=require("luadefaults"):open()
@@ -47,11 +66,13 @@ assert(#processing.requests==0 and #processing:jobs()==0 and not processing.runn
     "native retained confirmation must not start old processing or change the EPUB after installation")
 UI:close(stale)
 assert(calls==1 and settings:update().pending_version=="0.4.1")
-local new=Updater:new{settings=settings,api=api,current_version="0.4.1",plugin_dir=plugin}
-assert(new:confirmInstalledUpdate() and new:canRollback(),"startup confirmation must retain a recoverable code/settings backup")
-assert(new:rollbackUpdate())
-assert(settings:ui().series_style=="ribbon" and settings:update().pending_version==nil)
+local function cold(mode)
+    assert(os.execute(string.format("./luajit %q %q %q %q %q",root.."/spec/koreader_updater_install_integration.lua",root,package_path,mode,directory))==0)
+end
+cold("confirm-rollback")
+local restored=assert(settings.persistence:load(settings.path))
+assert(restored.data.ui.series_style=="ribbon" and restored.data.update.pending_version==nil)
 assert(files:read(plugin.."/koobone/plugin_version.lua"):find('version="0.4.0"',1,true))
-assert(updater:install(release),"explicit retry after completed rollback must retire only owned artifacts")
+cold("retry")
 print("KOReader real full-package upgrade/confirm/rollback/retry: OK")
 Device:exit()

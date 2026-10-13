@@ -49,7 +49,7 @@ package.preload["ui/gesturerange"] = function() return Widget end
 
 package.preload["datastorage"] = function()
     return {
-        getSettingsDir = function() return "/tmp" end,
+        getSettingsDir = function() return "./settings" end,
         getDataDir = function() return "/tmp" end,
         getFullDataDir = function() return "/tmp/koreader" end,
     }
@@ -112,6 +112,8 @@ end
 package.preload["libs/libkoreader-lfs"] = function()
     return {
         attributes = function() return nil end,
+        symlinkattributes = function() return nil end,
+        currentdir = function() return "/workspace" end,
         mkdir = function() return true end,
     }
 end
@@ -168,11 +170,15 @@ G_reader_settings = {
 }
 
 local Plugin = dofile("koocomic.koplugin/main.lua")
+assert(debug.getinfo(Plugin.init,"S").source:find("koobone/plugin.lua",1,true),
+    "the root entry must defer application imports until update recovery has run")
 assert(Plugin.version == "0.4.1")
 local instance = Plugin:new{
     ui = { menu = { registerToMainMenu = function() end } },
 }
 instance:init()
+assert(instance.settings.path=="/workspace/settings/koocomic.lua",
+    "portable relative settings directory must resolve without moving legacy files")
 assert(instance.download_service and instance.downloader.service==instance.download_service,
     "production main must bind the isolated queue instead of the legacy synchronous downloader")
 instance.settings.data.preprocess.strength=0.6

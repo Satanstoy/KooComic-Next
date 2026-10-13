@@ -26,6 +26,9 @@ local function code(path,version)
 end
 code(plugin,"0.4.1");code(plugin..".next-stage","0.5.0")
 local backend=Backend:new{plugin_dir=plugin,settings=settings}
+assert(files:write(backend.paths.stage.."/koobone/broken.lua","return {"))
+assert(not backend:validate(backend.paths.stage,"0.5.0"),"every packaged Lua module must compile before code exchange")
+assert(os.remove(backend.paths.stage.."/koobone/broken.lua"))
 local tx=require("koobone.update_transaction"):new{backend=backend,paths=backend.paths}
 assert(tx:install("0.4.1","0.5.0",function()
     settings.data.ui.series_style="stack";assert(settings:flush());return true end))

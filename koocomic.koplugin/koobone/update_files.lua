@@ -55,6 +55,17 @@ function Backend:remove(path,expected)
     return self.files:remove(path)
 end
 function Backend:clear() return self.files:remove(self.paths.journal) end
+function Backend:recoveryHashes(path)
+    local hashes={}
+    for _,name in ipairs({"update_transaction","update_files","preprocess_files","settings_store"}) do
+        local source=path.."/koobone/"..name..".lua"
+        if self.files:exists(source) then
+            hashes[name]=self.files:hash(source)
+            if not hashes[name] then return nil end
+        end
+    end
+    return hashes
+end
 function Backend:restoreSettings()
     local store=Store:new{path=self.paths.config,files=self.files}
     local payload,err=store:load(self.paths.config)
@@ -66,6 +77,30 @@ function Backend:restoreSettings()
 end
 function Backend:validate(path,version)
     if not self.files:isSafe(path) or lfs.symlinkattributes(path,"mode")~="directory" then return false end
+    local count,bytes=0,0
+    local function compile(directory,depth)
+        if depth>32 then return false end
+        local names={}
+        for name in lfs.dir(directory) do if name~="." and name~=".." then names[#names+1]=name end end
+        for _,name in ipairs(names) do
+            count=count+1;if count>10000 then return false end
+            local entry=directory.."/"..name
+            local stat=lfs.symlinkattributes(entry)
+            if not stat or not self.files:isSafe(entry) then return false end
+            if stat.mode=="directory" then
+                if not compile(entry,depth+1) then return false end
+            elseif stat.mode=="file" and (stat.nlink or 1)==1 then
+                bytes=bytes+stat.size;if bytes>15*1024*1024 then return false end
+                if name:match("%.lua$") then
+                    local source=self.files:read(entry,1024*1024)
+                    if not source or not loadstring(source) then return false end
+                end
+            else return false end
+        end
+        return true
+    end
+    local compiled,valid=pcall(compile,path,0)
+    if not compiled or not valid then return false end
     local metadata=self.files:read(path.."/koobone/plugin_version.lua",65536)
     local main=self.files:read(path.."/main.lua",1024*1024)
     if not metadata or not main or not loadstring(main) then return false end

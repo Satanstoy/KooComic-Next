@@ -30,6 +30,10 @@ function Transaction:install(old_version,new_version,persist_settings)
     if prior or load_error or b:exists(p.backup) or b:exists(p.failed) or b:exists(p.config) then return nil,"unresolved update backup" end
     local record={schema_version=1,product_id="koocomic-next",old_version=old_version,new_version=new_version,
         old_identity=b:identity(p.live),new_identity=b:identity(p.stage)}
+    if b.recoveryHashes then
+        record.recovery_hashes=b:recoveryHashes(p.live)
+        if not record.recovery_hashes then return nil,"recovery modules unreadable" end
+    end
     if not identity(record.old_identity) or not identity(record.new_identity) then return nil,"unsafe update directories" end
     if not self:_save(record,"planned") then return nil,"transaction save failed" end
     if not b:backupSettings(function(_,id)

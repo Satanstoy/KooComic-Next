@@ -136,6 +136,7 @@ function Settings:load()
 end
 
 function Settings:flush()
+    local active,reason=require("koobone.runtime_guard").ensure();if not active then return nil,reason end
     local payload=copy(self.payload or {})
     payload.data=copy(self.data)
     local ok,err=self.persistence:save(self.path,payload,self.migration_source)

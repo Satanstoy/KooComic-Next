@@ -19,5 +19,10 @@ for _,method in ipairs({"rollbackUpdate","recoverUpdate"}) do
     assert(not updater[method](updater))
     assert(updater.restart_required and not Guard.ensure(),
         method.." must block writes when code exchanged even though settings recovery failed")
+    local requests=0
+    updater.manifest_url="https://example.test/update.json";updater.release_prefix="https://example.test/releases/"
+    updater.api.requestOk=function() requests=requests+1;return nil,"network error" end
+    updater:check()
+    assert(requests==0,"a retained automatic update timer must not contact the network after recovery")
 end
 print("updater failed recovery guard spec: OK")

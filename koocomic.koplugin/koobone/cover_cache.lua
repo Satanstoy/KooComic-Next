@@ -61,7 +61,7 @@ end
 
 function CoverCache:new(api,options)
     options=options or {}
-    local base = ffiUtil.joinPath(DataStorage:getDataDir(), "cache")
+    local base = ffiUtil.joinPath(require("koobone.update_bootstrap").absolute(DataStorage:getDataDir()), "cache")
     local directory = ffiUtil.joinPath(base, "koobone-covers")
     ensureDirectory(directory)
     return setmetatable({

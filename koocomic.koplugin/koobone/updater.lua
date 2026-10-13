@@ -91,6 +91,7 @@ function Updater:_validateManifest(data)
 end
 
 function Updater:check()
+    local active,reason=Guard.ensure();if not active then return nil,reason end
     if not self:isConfigured() then return nil, "not_configured" end
     if not self:_manifestUrlAllowed(self.manifest_url) then return nil, "更新清单地址无效" end
     local response, err = self.api:requestOk{
@@ -127,6 +128,7 @@ function Updater:check()
 end
 
 function Updater:shouldAutoCheck()
+    if not Guard.ensure() then return false end
     local state = self.settings:update()
     if not self:isConfigured() or state.auto_check_enabled ~= true then return false end
     if state.auto_update_prompt_disabled == true then return false end
@@ -142,6 +144,7 @@ function Updater:shouldPrompt(release)
 end
 
 function Updater:markPromptShown(release)
+    if not Guard.ensure() then return false end
     local state = self.settings:update()
     state.last_update_prompt_date = Util.localDate()
     state.last_seen_update_version = release and release.version or state.last_seen_update_version
@@ -149,6 +152,7 @@ function Updater:markPromptShown(release)
 end
 
 function Updater:deferPrompt()
+    if not Guard.ensure() then return false end
     local state = self.settings:update()
     state.update_prompt_later_count = math.min(3,
         tonumber(state.update_prompt_later_count or 0) + 1)
@@ -160,6 +164,7 @@ function Updater:deferPrompt()
 end
 
 function Updater:resetPromptPolicy()
+    if not Guard.ensure() then return false end
     local state = self.settings:update()
     state.update_prompt_later_count = 0
     state.auto_update_prompt_disabled = false
@@ -221,6 +226,7 @@ function Updater:rollbackUpdate()
 end
 
 function Updater:install(release, on_progress)
+    local active,reason=Guard.ensure();if not active then return nil,reason end
     local validated=self:_validateManifest(release)
     if not validated or Util.compareVersions(validated.version,self.current_version)~=1 then
         return nil, "更新信息无效"
