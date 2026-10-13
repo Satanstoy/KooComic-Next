@@ -4,6 +4,7 @@ local ReaderUI = require("apps/reader/readerui")
 local UIManager = require("ui/uimanager")
 local DownloadDialog = require("koobone.ui.download_dialog")
 local Util = require("koobone.util")
+local Guard = require("koobone.runtime_guard")
 
 local Downloader = {}
 Downloader.__index = Downloader
@@ -30,6 +31,7 @@ function Downloader:isActive()
 end
 
 function Downloader:enqueue(items)
+    if not Guard.ensure() then UIManager:show(InfoMessage:new{text=Guard.reason});return nil,Guard.reason end
     if not self.service then return nil,"当前下载器不支持批量队列" end
     local preview,err=self.service:preview(items)
     if not preview then UIManager:show(InfoMessage:new{text=tostring(err)});return nil,err end
@@ -60,6 +62,7 @@ function Downloader:enqueue(items)
 end
 
 function Downloader:open(path)
+    if not Guard.ensure() then UIManager:show(InfoMessage:new{text=Guard.reason});return nil,Guard.reason end
     if self.preprocess and self.preprocess:isLocked(path) then
         UIManager:show(InfoMessage:new{text="这本漫画正在处理，请等待任务结束后再阅读。"})
         return nil
@@ -80,6 +83,7 @@ function Downloader:notifyChanged()
 end
 
 function Downloader:download(item)
+    if not Guard.ensure() then UIManager:show(InfoMessage:new{text=Guard.reason});return nil,Guard.reason end
     if self.active then
         UIManager:show(InfoMessage:new{ text = "已有一个下载任务正在进行。" })
         return

@@ -239,5 +239,10 @@ instance.library.items=cached
 instance:showAccount()
 account_options.on_logout()
 assert(#instance.library.items==0,"logout must clear remote in-memory catalog and pending requests")
+instance.updater.restart_required=true
+local reopened=false
+instance.bookshelf.show=function() reopened=true end
+instance:openBookshelf()
+assert(not reopened and shown[#shown].text:find("重启",1,true),"installed code must not start old in-memory reading/download workflows before restart")
 
 print("plugin load spec: OK")

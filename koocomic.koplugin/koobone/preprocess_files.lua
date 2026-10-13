@@ -54,6 +54,18 @@ function Files:mkdir(path)
     return require("util").makePath(path)
 end
 
+function Files:mkdirExclusive(path)
+    if not self:isSafe(path) then return nil,"unsafe directory reservation" end
+    local parent,name,_,ffi=openParent(path)
+    if not parent then return nil,name end
+    ffi.cdef[[int mkdirat(int, const char *, unsigned int);]]
+    local status=ffi.C.mkdirat(parent,name,ffi.cast("unsigned int",448))
+    local synced=status==0 and ffi.C.fsync(parent)==0
+    ffi.C.close(parent)
+    if status~=0 then return nil,"directory exists or cannot be reserved" end
+    return true,not synced and "directory sync failed" or nil
+end
+
 function Files:read(path,limit)
     if not self:isSafe(path) or lfs.attributes(path,"mode")~="file" then return nil,"unsafe file" end
     local size=tonumber(lfs.attributes(path,"size"))

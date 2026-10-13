@@ -30,6 +30,7 @@ local SettingsUI = require("koobone.ui.settings")
 local Storage = require("koobone.storage")
 local Updater = require("koobone.updater")
 local UpdaterUI = require("koobone.ui.updater")
+local RuntimeGuard=require("koobone.runtime_guard")
 
 local KooComic = WidgetContainer:extend{
     name = "koocomic",
@@ -85,10 +86,23 @@ function KooComic:init()
         current_version = self.version,
         manifest_url = PluginVersion.manifest_url,
         release_prefix = PluginVersion.release_prefix,
+        workloads={downloader=self.downloader,preprocess=self.preprocess},
     }
     self.updater_ui = UpdaterUI:new{
         updater = self.updater,
         downloader = self.downloader,
+        preprocess=self.preprocess,
+        on_changed=function(kind)
+            if kind~="installed" and kind~="rollback" then return end
+            self.download_service:pause();self.preprocess:pause()
+            require("koobone.ui.download_queue").closeAccountViews()
+            for index=#UIManager._window_stack,1,-1 do
+                local widget=UIManager._window_stack[index].widget
+                if widget.name=="koocomic_grid_shelf" or widget.name=="koocomic_info_panel" or widget.name=="koocomic_preprocess_queue" then
+                    UIManager:close(widget)
+                end
+            end
+        end,
     }
     self.bookshelf = Bookshelf:new{
         library = self.library,
@@ -108,7 +122,8 @@ function KooComic:init()
     -- Only reaching the end of initialization confirms a just-installed copy
     -- can load and register successfully. The rollback backup survives until
     -- this point.
-    self.updater:confirmInstalledUpdate()
+    local _,update_error=self.updater:confirmInstalledUpdate()
+    if update_error then UIManager:show(InfoMessage:new{text="插件更新恢复状态：\n"..tostring(update_error)}) end
 end
 
 function KooComic:addToMainMenu(menu_items)
@@ -160,11 +175,19 @@ function KooComic:addToMainMenu(menu_items)
 end
 
 function KooComic:showPreprocess()
+    if self:requireRestart() then return end
     return PreprocessUI.show(self.storage,self.preprocess,{settings=self.settings,library=self.library,cover_cache=self.cover_cache})
 end
 
 function KooComic:ensureOnline(callback)
+    if self:requireRestart() then return end
     NetworkMgr:runWhenOnline(callback)
+end
+
+function KooComic:requireRestart()
+    if not self.updater.restart_required and not RuntimeGuard.blocked then return false end
+    UIManager:show(InfoMessage:new{text="插件代码已切换，请先重启 KOReader。"})
+    return true
 end
 
 function KooComic:probeCatalogCapabilities()
@@ -202,6 +225,7 @@ function KooComic:showLogin()
 end
 
 function KooComic:openBookshelf()
+    if self:requireRestart() then return end
     if self.auth:hasSession() then
         local cached=self.library:loadCache()
         if cached then
@@ -234,6 +258,7 @@ function KooComic:launch()
 end
 
 function KooComic:showAccount()
+    if self:requireRestart() then return end
     AccountUI.show{
         settings = self.settings,
         auth = self.auth,
@@ -255,6 +280,7 @@ function KooComic:showAccount()
 end
 
 function KooComic:showDownloads()
+    if self:requireRestart() then return end
     DownloadsUI.show(self.storage, self.downloader)
 end
 

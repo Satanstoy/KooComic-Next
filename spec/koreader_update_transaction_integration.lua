@@ -71,4 +71,12 @@ backend.remove=function(self,path,expected)
 end
 assert(not tx:prepareNew() and files:read(backend.paths.config)=="external settings replacement",
     "native cleanup must preserve a settings artifact replaced after preflight")
+local staging_backend=Backend:new{plugin_dir=directory.."/staging.koplugin",settings=settings}
+assert(type(staging_backend.loadLease)=="function","native adapter must support durable staging ownership")
+local lease=require("koobone.update_staging"):new{backend=staging_backend}
+assert(lease:begin() and lease:createWork(),"native update work must be exclusively reserved and persisted")
+local archive_writer=assert(lease:openArchive());assert(archive_writer:write("fixture ZIP"));archive_writer:close()
+code(staging_backend.paths.work.."/koocomic.koplugin","0.5.0")
+assert(lease:handoff() and staging_backend:validate(staging_backend.paths.stage,"0.5.0"))
+assert(require("koobone.update_staging"):new{backend=staging_backend}:cleanup())
 print("KOReader atomic plugin directory exchange: OK")

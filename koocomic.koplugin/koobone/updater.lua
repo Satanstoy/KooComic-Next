@@ -1,11 +1,9 @@
 local Archiver = require("ffi/archiver")
-local DataStorage = require("datastorage")
 local JSON = require("json")
-local ffiUtil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
-local sha2 = require("ffi/sha2")
 local Util = require("koobone.util")
 local Version = require("version")
+local Guard=require("koobone.runtime_guard")
 
 local Updater = {}
 Updater.__index = Updater
@@ -16,56 +14,6 @@ Updater.MAX_PACKAGE_BYTES = 15 * 1024 * 1024
 local function pluginDirFromSource()
     local source = debug.getinfo(1, "S").source or ""
     return source:match("^@?(.+)/koobone/updater%.lua$")
-end
-
-local function ensureDirectory(path)
-    if lfs.attributes(path, "mode") == "directory" then return true end
-    local ok_util, koreader_util = pcall(require, "util")
-    if ok_util and koreader_util and koreader_util.makePath then
-        return koreader_util.makePath(path)
-    end
-    return lfs.mkdir(path)
-end
-
-local function removeFile(path)
-    if path and path ~= "" then pcall(os.remove, path) end
-end
-
-local function removeTree(path)
-    if type(path) ~= "string" or path == "" or path == "/" then
-        return nil, "invalid cleanup path"
-    end
-    if not lfs.attributes(path, "mode") then return true end
-    if not ffiUtil.purgeDir then return nil, "directory cleanup unavailable" end
-    local ok, err = pcall(ffiUtil.purgeDir, path)
-    return ok and true or nil, err
-end
-
-local function readFile(path, max_bytes)
-    local handle, err = io.open(path, "rb")
-    if not handle then return nil, err end
-    local size = handle:seek("end")
-    if not size or (max_bytes and size > max_bytes) then
-        handle:close()
-        return nil, "file is larger than expected"
-    end
-    handle:seek("set", 0)
-    local data = handle:read("*a")
-    handle:close()
-    return data
-end
-
-local function sha256File(path)
-    local handle, err = io.open(path, "rb")
-    if not handle then return nil, err end
-    local digest = sha2.sha256()
-    while true do
-        local chunk = handle:read(128 * 1024)
-        if not chunk then break end
-        digest(chunk)
-    end
-    handle:close()
-    return digest()
 end
 
 local function normalizeNotes(notes)
@@ -91,6 +39,7 @@ function Updater:new(options)
         manifest_url = options.manifest_url or "",
         release_prefix = options.release_prefix or "",
         plugin_dir = options.plugin_dir or pluginDirFromSource(),
+        workloads=options.workloads or {},
     }, self)
 end
 
@@ -225,33 +174,91 @@ function Updater:_extractPackage(archive_path, stage_path)
     return require("koobone.update_package"):new{reader=reader,files=files}:extract(archive_path,stage_path)
 end
 
+function Updater:_transaction()
+    if self.transaction then return self.transaction end
+    local called,backend=pcall(function()
+        return require("koobone.update_files"):new{plugin_dir=self.plugin_dir,settings=self.settings}
+    end)
+    if not called then return nil,"更新文件能力不可用" end
+    self.backend=backend
+    self.transaction=require("koobone.update_transaction"):new{backend=backend,paths=backend.paths}
+    self.staging=require("koobone.update_staging"):new{backend=backend}
+    return self.transaction
+end
+
+function Updater:recoverUpdate()
+    local tx,err=self:_transaction();if not tx then return nil,err end
+    local record,read_error=self.backend:load()
+    if read_error then return nil,read_error end
+    if record then
+        local prior=self.backend:identity(self.backend.paths.live)
+        local ok,recovery_error=tx:recover(self.current_version)
+        self.restart_required=self.backend:identity(self.backend.paths.live)~=prior or
+            not self.backend:validate(self.backend.paths.live,self.current_version)
+        if self.restart_required then Guard.block() end
+        if not ok then return nil,recovery_error end
+    end
+    return self.staging:cleanup()
+end
+
+function Updater:canRollback()
+    local tx=self:_transaction();if not tx then return false end
+    local record=tx:_load()
+    return record and (record.phase=="installed" or record.phase=="confirmed") and
+        self.backend:identity(self.backend.paths.live)==record.new_identity and
+        self.backend:identity(self.backend.paths.backup)==record.old_identity and
+        self.backend:identity(self.backend.paths.config)==record.config_identity or false
+end
+
+function Updater:rollbackUpdate()
+    local tx,err=self:_transaction();if not tx then return nil,err end
+    local prior=self.backend:identity(self.backend.paths.live)
+    local ok,rollback_error=tx:rollback()
+    self.restart_required=self.backend:identity(self.backend.paths.live)~=prior or
+        not self.backend:validate(self.backend.paths.live,self.current_version)
+    if self.restart_required then Guard.block() end
+    return ok,rollback_error
+end
+
 function Updater:install(release, on_progress)
     local validated=self:_validateManifest(release)
     if not validated or Util.compareVersions(validated.version,self.current_version)~=1 then
         return nil, "更新信息无效"
     end
     release=validated
+    if Guard.busy(self.workloads) then return nil,"下载或去彩纹任务正在运行" end
+    local tx,transaction_error=self:_transaction();if not tx then return nil,transaction_error end
+    if self.busy then return nil,"插件更新正在进行" end
+    if self.restart_required and not self.backend:validate(self.backend.paths.live,self.current_version) then
+        return nil,"请先重启 KOReader" end
+    local recovered,recovery_error=self:recoverUpdate();if not recovered then return nil,recovery_error end
+    if self.restart_required then return nil,"已恢复旧代码，请先重启 KOReader" end
+    local retired,retire_error=tx:prepareNew();if not retired then return nil,retire_error end
+    local began,begin_error=self.staging:begin();if not began then return nil,begin_error end
+    self.busy=true
+    local function fail(message)
+        self.busy=false
+        local restored,restore_error=self:recoverUpdate()
+        return nil,restored and tostring(message) or tostring(message).."；恢复待处理："..tostring(restore_error)
+    end
+    local made,work_error=self.staging:createWork();if not made then return fail(work_error) end
+    local handle,open_error=self.staging:openArchive();if not handle then return fail(open_error) end
+    local archive,stage=self.backend.paths.archive,self.backend.paths.work
+    local archive_identity=self.backend:identity(archive)
     local function report(stage, percent, current, total)
         if on_progress then
-            on_progress{
+            pcall(on_progress,{
                 stage = stage,
                 percent = percent,
                 current = current or 0,
                 total = total or 0,
-            }
+            })
         end
     end
 
-    local base = DataStorage:getDataDir() .. "/koocomic-updates"
-    local archive = base .. "/koocomic-update.zip"
-    local stage = base .. "/stage"
-    removeFile(archive)
-    removeTree(stage)
-    ensureDirectory(base)
-    ensureDirectory(stage)
-
     report("正在下载更新包", 2, 0, release.size)
-    local ok, err = self.api:download(release.package_url, archive, {
+    local called,ok,err=pcall(self.api.download,self.api,release.package_url,archive,{
+        handle=handle,
         total = release.size,
         max_bytes = self.MAX_PACKAGE_BYTES,
         headers = {
@@ -263,62 +270,47 @@ function Updater:install(release, on_progress)
             report("正在下载更新包", math.floor(2 + ratio * 68), current, total)
         end,
     })
-    if not ok then removeFile(archive); removeTree(stage); return nil, err end
+    pcall(handle.close,handle)
+    if not called or not ok then return fail(called and err or "下载更新包异常") end
+    if self.backend:identity(archive)~=archive_identity then return fail("更新包文件已变化") end
 
     local archive_size = lfs.attributes(archive, "size")
     local size = tonumber(archive_size) or 0
     if size ~= tonumber(release.size) then
-        removeFile(archive); removeTree(stage)
-        return nil, "更新包大小校验失败"
+        return fail("更新包大小校验失败")
     end
     report("正在校验 SHA-256", 76)
-    local actual, hash_err = sha256File(archive)
-    if not actual or actual:lower() ~= release.sha256 then
-        removeFile(archive); removeTree(stage)
-        return nil, hash_err or "SHA-256 校验失败"
+    local actual, hash_err = self.backend.files:hash(archive)
+    if not actual or actual:lower() ~= release.sha256 or self.backend:identity(archive)~=archive_identity then
+        return fail(hash_err or "SHA-256 校验失败")
     end
 
     report("正在安全解压", 86)
-    local unpacked, unpack_err = self:_extractPackage(archive, stage)
-    removeFile(archive)
-    if not unpacked then removeTree(stage); return nil, unpack_err end
-
-    local staged_plugin = stage .. "/koocomic.koplugin"
-    local meta = readFile(staged_plugin .. "/_meta.lua", 64 * 1024)
-    local main = readFile(staged_plugin .. "/main.lua", 1024 * 1024)
-    local staged_version = meta and meta:match('version%s*=%s*"([^"]+)"') or nil
-    if not main or staged_version ~= release.version then
-        removeTree(stage)
-        return nil, "更新包结构或版本号不正确"
-    end
+    local extracted,unpacked,unpack_err=pcall(self._extractPackage,self,archive,stage)
+    if not extracted or not unpacked then return fail(extracted and unpack_err or "更新包解压异常") end
+    local handed,handoff_error=self.staging:handoff();if not handed then return fail(handoff_error) end
+    if not self.backend:validate(self.backend.paths.stage,release.version) then return fail("更新包产品、结构或版本不正确") end
 
     report("正在备份并安装", 96)
-    local backup = self.plugin_dir .. ".backup"
-    removeTree(backup)
-    local moved_old, old_err = os.rename(self.plugin_dir, backup)
-    if not moved_old then removeTree(stage); return nil, old_err or "无法备份当前插件" end
-    local moved_new, new_err = os.rename(staged_plugin, self.plugin_dir)
-    if not moved_new then
-        os.rename(backup, self.plugin_dir)
-        removeTree(stage)
-        return nil, new_err or "无法启用新版本，已恢复旧版本"
-    end
-    removeTree(stage)
-    local state = self.settings:update()
-    state.pending_version = release.version
-    state.available = nil
-    self.settings:flush()
+    local installed,install_error=tx:install(self.current_version,release.version,function()
+        local state=self.settings:update();state.pending_version=release.version;state.available=nil
+        return self.settings:flush()
+    end)
+    if not installed then return fail(install_error) end
+    self.busy=false;self.restart_required=true;Guard.block()
+    local cleaned,cleanup_error=self.staging:cleanup()
     report("安装完成", 100)
-    return true
+    return true,not cleaned and cleanup_error or nil
 end
 
 function Updater:confirmInstalledUpdate()
-    local state = self.settings:update()
-    if state.pending_version ~= self.current_version then return false end
-    local backup = self.plugin_dir .. ".backup"
-    removeTree(backup)
-    state.pending_version = nil
-    self.settings:flush()
+    local ok,err=self:recoverUpdate();if not ok then return nil,err end
+    if self.restart_required then return nil,"旧版本已恢复，请重启 KOReader" end
+    local record=self.transaction:_load();if not record or record.phase~="confirmed" then return false end
+    local state=self.settings:update();local prior=state.pending_version
+    state.pending_version=nil
+    local called,saved=pcall(self.settings.flush,self.settings)
+    if not called or not saved then state.pending_version=prior;return nil,"更新确认状态保存失败，备份已保留" end
     return true
 end
 

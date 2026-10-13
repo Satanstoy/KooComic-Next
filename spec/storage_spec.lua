@@ -164,6 +164,11 @@ files["/outside.epub"]={size=99}
 download.records.bad={path="/outside.epub"}
 assert(not storage:deleteRecordFiles("bad") and files["/outside.epub"],"all deletion entrypoints must reject outside-root records")
 
+files[final_path]={size=47}
+local guard=require("koobone.runtime_guard");guard.block()
+assert(not storage:deleteItem(item) and files[final_path],"old deletion confirmations must preserve files after a code switch")
+local prior_flushes=flush_count
+assert(not storage:record(item,"complete") and flush_count==prior_flushes,"code replacement must block stale local record writes")
 os.remove = original_remove
 
 print("storage spec: OK")

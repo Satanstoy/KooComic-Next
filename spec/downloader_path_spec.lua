@@ -61,4 +61,7 @@ assert(enqueued==0 and shown[#shown].ok_callback and shown[#shown].text:find("�
 assert(not shown[#shown].text:find("暂存最多",1,true),"unknown sizes cannot promise a maximum staging size")
 shown[#shown].ok_callback()
 assert(enqueued==2 and resumed and transfers==0,"new downloads must use the isolated queue service, not legacy synchronous IO")
+require("koobone.runtime_guard").block()
+reader_called=false
+assert(not Downloader.open(downloader,"/books/old.epub") and not reader_called,"old reader callbacks must not open files after a code switch")
 print("downloader path spec: OK")

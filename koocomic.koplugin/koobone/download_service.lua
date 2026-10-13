@@ -1,4 +1,5 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
+local Guard=require("koobone.runtime_guard")
 local Queue=require("koobone.download_queue")
 local Entry=require("koobone.catalog_entry")
 local Worker=require("koobone.download_worker")
@@ -161,6 +162,7 @@ function Service:preview(items)
 end
 
 function Service:enqueue(items,account)
+    if not Guard.ensure() then return nil,Guard.reason end
     if account~=self:account() then return nil,"账号已变化，请重新确认" end
     local preview,err=self:preview(items);if not preview then return nil,err end
     local counts,add_error=self.queue:add(preview.items,{reopen_completed=true,
@@ -243,6 +245,7 @@ function Service:_pump()
 end
 
 function Service:resume()
+    if not Guard.ensure() then return nil,Guard.reason end
     local queue,err=self:ensure();if not queue then return nil,err end
     if not queue:resume() then return nil,"队列状态保存失败" end
     self.running=true;self:_pump();return true
@@ -268,6 +271,7 @@ function Service:cancel(id)
 end
 
 function Service:retry(id)
+    if not Guard.ensure() then return nil,Guard.reason end
     local queue,err=self:ensure();if not queue then return nil,err end
     local ok,retry_error=queue:retry(id,false,false,true)
     if ok then

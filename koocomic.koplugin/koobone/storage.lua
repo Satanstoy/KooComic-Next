@@ -2,6 +2,7 @@ local DataStorage = require("datastorage")
 local ffiUtil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
 local Util = require("koobone.util")
+local Guard = require("koobone.runtime_guard")
 
 local Storage = {}
 Storage.__index = Storage
@@ -137,6 +138,7 @@ function Storage:partSize(item)
 end
 
 function Storage:record(item, state, extra)
+    if not Guard.ensure() then return nil,Guard.reason end
     local records = self.settings:download().records
     local key = self:itemKey(item)
     local value = records[key] or {}
@@ -190,6 +192,7 @@ function Storage:recordInfo(row)
 end
 
 function Storage:removeRecord(key)
+    if not Guard.ensure() then return nil,Guard.reason end
     local records = self.settings:download().records
     if key == nil or records[key] == nil then return true, false end
     records[key] = nil
@@ -198,6 +201,7 @@ function Storage:removeRecord(key)
 end
 
 function Storage:_deleteRecordFiles(key, final_path, part_path, delete_final, delete_part)
+    if not Guard.ensure() then return nil,Guard.reason end
     if delete_final and not self:isSafeLocalPath(final_path) then return nil,"阅读文件路径不安全" end
     if delete_part and (not self:isSafeLocalPath(part_path) or not part_path:lower():match("%.part$")) then
         return nil,"临时文件路径不安全"
@@ -329,6 +333,7 @@ function Storage:maintenanceSummary()
 end
 
 function Storage:cleanupMissingRecords()
+    if not Guard.ensure() then return 0,Guard.reason end
     local records = self.settings:download().records
     local removed = 0
     for key, value in pairs(records) do
@@ -343,6 +348,7 @@ function Storage:cleanupMissingRecords()
 end
 
 function Storage:cleanupPartialFiles()
+    if not Guard.ensure() then return {files=0,bytes=0,errors={Guard.reason}} end
     local records = self.settings:download().records
     local removed_files, removed_bytes = 0, 0
     local errors = {}

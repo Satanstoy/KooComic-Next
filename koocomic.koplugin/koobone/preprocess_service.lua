@@ -1,4 +1,5 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
+local Guard=require("koobone.runtime_guard")
 local Queue=require("koobone.preprocess_queue")
 local Coordinator=require("koobone.resource_coordinator")
 local Identity=require("koobone.preprocess_identity")
@@ -245,6 +246,7 @@ function Service:previewBatch(items)
 end
 
 function Service:submitBatch(items,expected_profile)
+    if not Guard.ensure() then return nil,Guard.reason end
     local preview,err=self:previewBatch(items);if not preview then return nil,err end
     if expected_profile~=nil then
         local function key(profile)
@@ -292,6 +294,7 @@ function Service:batchSummary()
 end
 
 function Service:submit(item)
+    if not Guard.ensure() then return nil,Guard.reason end
     if not self.available then return nil,self.reason end
     if self.reconciling then return nil,"正在核对文件事务，请稍后重试" end
     local profile,profile_error=self:profile()
@@ -310,6 +313,7 @@ function Service:submit(item)
 end
 
 function Service:restore(item)
+    if not Guard.ensure() then return nil,Guard.reason end
     if not self.available then return nil,self.reason end
     if self.reconciling then return nil,"正在核对文件事务，请稍后重试" end
     local path=self.storage:resolveLocalPath(item)
@@ -340,6 +344,7 @@ function Service:cancel(id)
 end
 
 function Service:retry(id)
+    if not Guard.ensure() then return nil,Guard.reason end
     if not self.available then return nil,self.reason end
     if type(id)=="number" then
         for _, request in ipairs(self.requests) do
@@ -417,6 +422,7 @@ function Service:_hash(request,token)
 end
 
 function Service:resume()
+    if not Guard.ensure() then return nil,Guard.reason end
     if not self.available then return nil,self.reason end
     if self.reconciling then return nil,"正在核对文件事务，请稍后重试" end
     local ok,err=self.queue:resume()

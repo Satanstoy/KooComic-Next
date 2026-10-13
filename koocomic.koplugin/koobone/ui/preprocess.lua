@@ -95,7 +95,7 @@ function PreprocessUI.show(storage,service,options)
         return result
     end
     local update
-    menu=Menu:new{title="去彩纹处理队列",item_table=rows(),is_borderless=true,title_bar_fm_style=true}
+    menu=Menu:new{name="koocomic_preprocess_queue",title="去彩纹处理队列",item_table=rows(),is_borderless=true,title_bar_fm_style=true}
     local original_close=menu.onCloseWidget or Menu.onCloseWidget
     menu.onCloseWidget=function(widget)
         closed=true

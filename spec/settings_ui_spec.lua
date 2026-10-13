@@ -29,4 +29,12 @@ assert(ui.series_style=="ribbon" and flushes==1 and changes==1)
 local profile_button
 for _,row in ipairs(dialog.buttons) do for _,button in ipairs(row) do if button.text=="去彩纹参数" then profile_button=button end end end
 assert(profile_button,"settings must expose processing scale and strength controls")
+local rollback_calls=0
+options.updater.canRollback=function() return true end
+options.updater_ui.rollback=function() rollback_calls=rollback_calls+1 end
+dialog=require("koobone.ui.settings").show(options)
+local rollback_button
+for _,row in ipairs(dialog.buttons) do for _,button in ipairs(row) do if button.text=="回退插件版本" then rollback_button=button end end end
+assert(rollback_button and rollback_button.enabled,"verified backups need a native settings rollback entry")
+rollback_button.callback();assert(rollback_calls==1)
 print("settings UI spec: OK")

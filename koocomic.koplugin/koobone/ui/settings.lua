@@ -118,6 +118,10 @@ function SettingsUI.show(options)
                 },
             },
             {
+                {text="回退插件版本",enabled=updater.canRollback and updater:canRollback() or false,
+                    callback=function() UIManager:close(dialog);updater_ui:rollback() end},
+            },
+            {
                 {
                     text = state.auto_update_prompt_disabled and
                         "重新开启自动提醒" or

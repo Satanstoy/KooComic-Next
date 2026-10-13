@@ -14,7 +14,8 @@ function Backend:new(options)
     local settings=assert(options.settings)
     local settings_path=absolute(assert(settings.path))
     local paths={live=live,stage=live..".next-stage",backup=live..".next-backup",failed=live..".next-failed",
-        config=live..".next-settings.lua",journal=live..".next-update.json"}
+        config=live..".next-settings.lua",journal=live..".next-update.json",work=live..".next-work",
+        archive=live..".next-package.zip",lease=live..".next-staging.json"}
     local files=options.files or Files:new{roots={assert(live:match("^(.*)/[^/]+$")),assert(settings_path:match("^(.*)/[^/]+$"))}}
     assert(files:isSafe(live) and files:isSafe(settings_path),"unsafe update roots")
     return setmetatable({paths=paths,settings=settings,settings_path=settings_path,files=files},self)
@@ -33,6 +34,13 @@ function Backend:load()
     if not self.files:exists(self.paths.journal) then return nil end
     return self.files:readJSON(self.paths.journal)
 end
+function Backend:loadLease()
+    if not self.files:exists(self.paths.lease) then return nil end
+    return self.files:readJSON(self.paths.lease)
+end
+function Backend:saveLease(record) return self.files:writeJSON(self.paths.lease,record) end
+function Backend:clearLease() return self.files:remove(self.paths.lease) end
+function Backend:createDirectory(path) return self.files:mkdirExclusive(path) end
 function Backend:backupSettings(created)
     local id=self.files:identity(self.settings_path)
     if not id then return nil,"unsafe settings source" end

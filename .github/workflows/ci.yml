@@ -93,3 +93,11 @@ jobs:
           shasum -a 256 -c koocomic.koplugin-*.zip.sha256
           python3 -m json.tool update.json >/dev/null
           test -s release-notes.md
+
+      - name: Verify full-package upgrade and rollback in KOReader
+        shell: bash
+        run: |
+          packages=("$GITHUB_WORKSPACE"/dist-ci/release/koocomic.koplugin-v*.zip)
+          test "${#packages[@]}" -eq 1
+          cd /tmp/koreader-runtime/lib/koreader
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-installer-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_updater_install_integration.lua" "$GITHUB_WORKSPACE" "${packages[0]}"
