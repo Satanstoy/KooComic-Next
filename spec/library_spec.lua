@@ -67,4 +67,17 @@ assert(completed and #library.items==1)
 assert(library:refreshAsync(function() error("stale account callback must be ignored") end))
 value=work();account="99";library:clear();callback(value)
 assert(#library.items==0 and saved.account_id=="42","late account results must never commit or repaint")
+account="42"
+local version_items={{vol_id=77,file_md5="first",vol_name="Original",volume_id_verified=true},
+    {vol_id=77,file_md5="second",vol_name="Original revised"}}
+assert(type(library.identityOptions)=="function","library must carry explicit trusted identity evidence")
+assert(library:accept(account,version_items))
+assert(saved.entries[1].volume_id~=saved.entries[2].volume_id,"server-provided verified flags cannot authorize merging")
+library.source_identity_options={volume_id_verified=true}
+assert(library:accept(account,version_items))
+assert(saved.entries[1].volume_id==saved.entries[2].volume_id)
+library:clear();assert(library:loadCache())
+assert(library:identityOptions(library.items[1]).volume_id_verified==true,"offline reconstruction must retain validated volume relationships")
+account="99"
+assert(not library:identityOptions(library.items[1]).volume_id_verified,"identity evidence must not cross accounts")
 print("library full catalog spec: OK")

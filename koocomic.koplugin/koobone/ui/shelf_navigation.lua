@@ -6,7 +6,8 @@ Navigation.__index = Navigation
 
 function Navigation:new(options)
     return setmetatable({account_id=tostring(options.account_id or "local"), storage=options.storage,
-        mode="series", page=1, query="", sort_mode="recent", filter_mode="all", memories={}, books={}}, self)
+        mode="series", page=1, query="", sort_mode="recent", filter_mode="all", memories={}, books={},
+        identity_options=options.identity_options}, self)
 end
 
 function Navigation:setAccount(id)
@@ -32,6 +33,18 @@ function Navigation:rowKey(item)
     if item._series then return Entry.key(self.account_id,"series",item._series.key) end
     local entry=Entry.normalize(self.account_id,item)
     return entry and entry.id
+end
+
+function Navigation:versions(item)
+    local options=self.identity_options and self.identity_options(item)
+    local entry=Entry.normalize(self.account_id,item,options)
+    if not entry or entry.volume_id==entry.id then return {item} end
+    local result={}
+    for _,candidate in ipairs(self.books) do
+        local normalized=Entry.normalize(self.account_id,candidate,self.identity_options and self.identity_options(candidate))
+        if normalized and normalized.volume_id==entry.volume_id then result[#result+1]=candidate end
+    end
+    return result
 end
 
 function Navigation:_state()
@@ -81,7 +94,7 @@ function Navigation:items(visible)
     end
     local entries, by_id, invalid = {}, {}, {}
     for _, item in ipairs(self.books) do
-        local entry = Entry.normalize(self.account_id, item)
+        local entry = Entry.normalize(self.account_id, item,self.identity_options and self.identity_options(item))
         if entry then
             if not by_id[entry.id] then entries[#entries+1] = entry; by_id[entry.id] = item end
         else invalid[#invalid+1] = item end

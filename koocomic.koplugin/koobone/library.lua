@@ -11,6 +11,7 @@ function Library:new(api, storage, options)
         fetched_at = 0,
         account=options.account or function() return storage.settings and storage.settings:account().uin end,
         store=options.store,now=options.now or os.time,coverage="unknown",runner=options.runner,
+        source_identity_options=options.identity_options or {},identity_keys={},
     }, self)
 end
 
@@ -56,7 +57,7 @@ function Library:accept(account,items)
     if not valid then return nil,err end
     local entries={}
     for index,item in ipairs(items) do
-        entries[index]=assert(Entry.normalize(account,item));entries[index].sort_rank=index
+        entries[index]=assert(Entry.normalize(account,item,self.source_identity_options));entries[index].sort_rank=index
     end
     local timestamp=self.now()
     if self.store then
@@ -65,6 +66,9 @@ function Library:accept(account,items)
     end
     self.items,self.account_id,self.fetched_at,self.coverage=items,account,timestamp,"complete"
     self.urls_at=timestamp
+    self.identity_keys={}
+    for _,entry in ipairs(entries) do self.identity_keys[entry.id]={volume_id_verified=entry.volume_id~=entry.id,
+        series_id_verified=entry.series_id~=nil} end
     for _,item in ipairs(items) do item._catalog_account_id=account end
     return items,{total=#items,coverage="complete"}
 end
@@ -77,11 +81,13 @@ function Library:loadCache()
     local snapshot,err=self.store:load(account)
     if not snapshot then return nil,err end
     local items={}
+    self.identity_keys={}
     for _,entry in ipairs(snapshot.entries) do
         items[#items+1]={vol_id=entry.source.vol_id,file_md5=entry.source.file_md5,vol_name=entry.title,
             vol_series=entry.series_title,vol_author=entry.author,vol_index=entry.volume_label,file_size=entry.remote_size,
             file_type=entry.file_type or "epub",count_page=entry.remote_pages,last_readpage=entry.remote_page,
-            _catalog_account_id=account}
+            vol_series_id=entry.series_id,_catalog_account_id=account}
+        self.identity_keys[entry.id]={volume_id_verified=entry.volume_id~=entry.id,series_id_verified=entry.series_id~=nil}
     end
     self.items,self.fetched_at,self.coverage=items,snapshot.meta.synced_at or 0,"complete"
     self.urls_at=nil
@@ -93,6 +99,12 @@ function Library:clear()
     self.sync=nil
     self.items,self.account_id,self.fetched_at,self.coverage={},nil,0,"unknown"
     self.urls_at=nil
+    self.identity_keys={}
+end
+
+function Library:identityOptions(item)
+    local entry=Entry.normalize(tostring(self.account() or ""),item)
+    return entry and self.identity_keys[entry.id] or {}
 end
 
 function Library:refreshAsync(complete)

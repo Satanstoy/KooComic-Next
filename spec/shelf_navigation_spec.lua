@@ -45,4 +45,13 @@ nav:setBooks(sorted)
 assert(nav:items(sorted)[1]._series.title == "Z", "recent/progress series order must follow visible member ranks")
 nav.sort_mode = "title"
 assert(nav:items(sorted)[1]._series.title == "A")
+local versions={{vol_id=10,file_md5="v1",vol_name="Original",vol_series="Versions",vol_author="A"},
+    {vol_id=10,file_md5="v2",vol_name="Original revised",vol_series="Versions",vol_author="A"},
+    {vol_id=11,file_md5="v3",vol_name="Original",vol_series="Versions",vol_author="A"}}
+nav:setBooks(versions)
+assert(type(nav.versions)=="function","trusted file versions must be exposed to production details")
+assert(#nav:versions(versions[1])==1,"same vol_id without evidence must not merge versions")
+nav.identity_options=function() return {volume_id_verified=true} end
+assert(#nav:versions(versions[1])==2 and nav:items(versions)[1]._series.volume_count==2)
+assert(#nav:versions(versions[3])==1,"same title on another volume is not a version")
 print("shelf navigation spec: OK")

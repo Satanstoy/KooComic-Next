@@ -35,7 +35,8 @@ function Bookshelf:new(options)
         cover_generation = 0,
         grid_view = nil,
     }, self)
-    shelf.navigation = Navigation:new{account_id=options.settings:account().uin, storage=options.storage}
+    shelf.navigation = Navigation:new{account_id=options.settings:account().uin, storage=options.storage,
+        identity_options=function(item) return shelf.library.identityOptions and shelf.library:identityOptions(item) or {} end}
     shelf.selection=Selection:new(options.settings:account().uin)
     shelf.local_manager=options.local_manager or LocalManager:new{storage=options.storage,downloader=options.downloader,
         coordinator=options.downloader.coordinator}
@@ -204,13 +205,7 @@ function Bookshelf:_gridOptions(books)
             end
             if self.selection.active then self.selection:toggle(item);self:_render();return end
             if self.on_book_select then self.on_book_select(item);return end
-            BookDetail.show{
-                item = item,
-                storage = self.storage,
-                downloader = self.downloader,
-                settings = self.settings,
-                preprocess = self.preprocess,
-            }
+            self:showBookDetail(item)
         end,
         on_refresh = function() self:refresh() end,
         on_search = function() self:showSearch() end,
@@ -225,6 +220,20 @@ function Bookshelf:_gridOptions(books)
         end,
     }
     return self.decorate_grid and self.decorate_grid(grid_options) or grid_options
+end
+
+function Bookshelf:showBookDetail(item)
+    local account=self.navigation.account_id
+    return BookDetail.show{item=item,storage=self.storage,downloader=self.downloader,settings=self.settings,
+        preprocess=self.preprocess,versions=self.navigation:versions(item),on_select_version=function(version)
+            local wanted=self.navigation:rowKey(version)
+            if tostring(self.settings:account().uin or "local")==account then
+                for _,candidate in ipairs(self.library.items) do
+                    if self.navigation:rowKey(candidate)==wanted then return self:showBookDetail(candidate) end
+                end
+            end
+            UIManager:show(InfoMessage:new{text="这个文件版本不再可用，请刷新书库。"})
+        end}
 end
 
 function Bookshelf:_items(books)
@@ -257,13 +266,7 @@ function Bookshelf:_items(books)
             mandatory = state,
             post_text = Util.friendlySize(item.file_size),
             callback = function()
-                BookDetail.show{
-                    item = item,
-                    storage = self.storage,
-                    downloader = self.downloader,
-                    settings = self.settings,
-                    preprocess = self.preprocess,
-                }
+                self:showBookDetail(item)
             end,
         }
     end

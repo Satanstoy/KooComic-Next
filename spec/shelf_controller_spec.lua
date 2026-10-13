@@ -7,7 +7,8 @@ package.preload["socket"] = function() return {gettime=os.time} end
 local shown,callbacks=nil,{}
 package.preload["ui/uimanager"] = function() return {show=function(_,widget) shown=widget end,close=function() end,
     scheduleIn=function(_,delay,callback) callbacks[#callbacks+1]=callback end} end
-package.preload["koobone.ui.book_detail"] = function() return {show=function() end} end
+local details
+package.preload["koobone.ui.book_detail"] = function() return {show=function(options) details=options end} end
 local current
 package.preload["koobone.ui.bookshelf_grid"] = function()
     return {show=function(options)
@@ -99,4 +100,17 @@ assert(current.preserve_anchor==true and current.row_key(books[1])~=current.row_
     "production catalog refresh must explicitly preserve a stable account-aware grid anchor")
 current.on_view("series")
 assert(not current.preserve_anchor,"view switching must retain its own navigation memory")
+local versions={{vol_id=90,file_md5="v1",vol_name="Original version"},
+    {vol_id=90,file_md5="v2",vol_name="Revised version"}}
+shelf.library.identityOptions=function() return {volume_id_verified=true} end
+shelf.selection:cancel();shelf:show(versions);current.on_view("volumes");current.on_select(versions[1])
+assert(details.versions and #details.versions==2 and details.on_select_version,
+    "production details must expose only trusted versions")
+local choose=details.on_select_version
+local replacement={vol_id=90,file_md5="v2",vol_name="Fresh revised version"}
+shelf:show({versions[1],replacement});choose(versions[2])
+assert(details.item==replacement,"version selection must resolve current catalog identity, not stale tables")
+local before=details
+shelf:show({versions[1]});choose(versions[2]);assert(details==before)
+assert(shown.text:find("不再可用",1,true),"removed file versions must not open stale actions")
 print("shelf controller spec: OK")

@@ -33,6 +33,14 @@ function InfoPanel:init()
     local title_height = math.floor(content_height * 0.14)
     local subtitle_height = math.floor(content_height * 0.09)
     local body_height = math.floor(content_height * 0.49)
+    self.button_table = ButtonTable:new{
+        width = content_width,
+        show_parent = self,
+        zero_sep = false,
+        buttons = self.buttons or {},
+    }
+    body_height=math.min(body_height,math.max(1,content_height-title_height-subtitle_height-
+        Metrics.dp(18)-self.button_table:getSize().h))
 
     local group = VerticalGroup:new{ align = "center" }
     group[#group + 1] = TextBoxWidget:new{
@@ -70,12 +78,6 @@ function InfoPanel:init()
         alignment = self.body_align or "left",
     }
     group[#group + 1] = VerticalSpan:new{ height = Metrics.dp(10) }
-    self.button_table = ButtonTable:new{
-        width = content_width,
-        show_parent = self,
-        zero_sep = false,
-        buttons = self.buttons or {},
-    }
     group[#group + 1] = self.button_table
 
     self.frame = FrameContainer:new{
