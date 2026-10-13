@@ -169,6 +169,7 @@ function Bookshelf:_gridOptions(books)
         filter_label = filter_label,
         mode = nav.mode,
         page = nav.page,
+        row_key=function(item) return nav:rowKey(item) end,
         selection_active=self.selection.active,
         selected_count=self.selection:count(),
         is_selected=function(item) return not item._series and self.selection:contains(item) end,
@@ -285,9 +286,10 @@ function Bookshelf:_showListFallback(books)
     return self.menu
 end
 
-function Bookshelf:show(books)
+function Bookshelf:show(books,preserve_anchor)
     local account_id = tostring(self.settings:account().uin or "local")
     if account_id ~= self.navigation.account_id then
+        preserve_anchor=false
         self.navigation:setAccount(account_id)
         self.query, self.sort_mode, self.filter_mode = "", "recent", "all"
     end
@@ -300,6 +302,7 @@ function Bookshelf:show(books)
     if not grid_available then return self:_showListFallback(visible) end
 
     local options = self:_gridOptions(visible)
+    options.preserve_anchor=preserve_anchor==true
     if self.grid_view and not self.grid_view.closed then
         self.grid_view:update(options)
         self.menu = self.grid_view
@@ -527,7 +530,7 @@ function Bookshelf:refresh()
             UIManager:show(InfoMessage:new{text="无法加载完整书库，已保留缓存：\n"..tostring(err)})
             return
         end
-        local rendered,render_err=pcall(self.show,self,books)
+        local rendered,render_err=pcall(self.show,self,books,true)
         if not rendered then UIManager:show(InfoMessage:new{
             text="生成书架界面时发生错误：\n"..Util.cleanMessage(render_err)}) end
     end
@@ -550,7 +553,7 @@ function Bookshelf:refresh()
             UIManager:show(InfoMessage:new{ text = "无法加载书架：\n" .. tostring(err) })
             return
         end
-        local render_ok, render_err = pcall(function() self:show(books) end)
+        local render_ok, render_err = pcall(function() self:show(books,true) end)
         if not render_ok then
             UIManager:show(InfoMessage:new{
                 text = "生成书架界面时发生错误：\n" .. Util.cleanMessage(render_err),

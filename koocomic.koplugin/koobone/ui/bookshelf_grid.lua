@@ -633,6 +633,14 @@ function GridShelf:_build()
     columns, rows = self.layout.columns, self.layout.rows
     self.perpage = columns * rows
     self.pages = math.max(1, math.ceil(#self.options.books / self.perpage))
+    if self.refresh_anchor and self.options.row_key then
+        for index,item in ipairs(self.options.books) do
+            if self.options.row_key(item)==self.refresh_anchor then
+                self.page=math.floor((index-1)/self.perpage)+1;break
+            end
+        end
+    end
+    self.refresh_anchor=nil
     self.page = math.max(1, math.min(self.pages, self.page))
 
     local margin = self.layout.margin
@@ -686,12 +694,18 @@ end
 
 function GridShelf:update(options, notify)
     if self.closed then return false end
+    if options and options.preserve_anchor then self:_captureAnchor() end
     for key, value in pairs(options or {}) do self.options[key] = value end
     if options and options.page then self.page = options.page end
     self:_build()
     UIManager:setDirty(self, "full")
     if notify ~= false then self:_notifyPage() end
     return true
+end
+
+function GridShelf:_captureAnchor()
+    local item=self:visibleItems()[1]
+    self.refresh_anchor=item and self.options.row_key and self.options.row_key(item) or nil
 end
 
 function GridShelf:refreshCovers()
@@ -722,6 +736,7 @@ end
 
 function GridShelf:onScreenResize()
     if self.closed then return true end
+    self:_captureAnchor()
     self:_build()
     UIManager:setDirty(self, "full")
     self:_notifyPage()

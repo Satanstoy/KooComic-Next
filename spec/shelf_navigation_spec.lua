@@ -9,6 +9,9 @@ local books = {
 local storage = {isDownloaded=function(_, item) return item.file_md5 == "b" end}
 local nav = Navigation:new{account_id="42", storage=storage}
 nav:setBooks(books)
+assert(type(nav.rowKey)=="function","navigation must expose stable refresh identities")
+assert(nav:rowKey(books[1])~=nav:rowKey({vol_id=1,file_md5="different",vol_name=books[1].vol_name}))
+local old_key=nav:rowKey(books[1])
 local cards = nav:items(books)
 assert(nav.mode == "series" and #cards == 2)
 assert(cards[1]._series.volume_count == 2 and cards[1]._series.downloaded_count == 1)
@@ -32,6 +35,7 @@ nav:switch("volumes")
 assert(nav.page == 2 and nav.query == "Original")
 assert(books[1].vol_name == "Original 10", "navigation must not rewrite titles")
 nav:setAccount("99")
+assert(nav:rowKey(books[1])~=old_key,"refresh anchors must be account isolated")
 assert(nav.mode == "series" and nav.page == 1 and nav.query == "" and #nav:items({}) == 0)
 local sorted = {
     {vol_id=4,file_md5="d",vol_name="Z",vol_series="Z",vol_author="Author"},

@@ -143,6 +143,25 @@ assert(view.page == 5)
 assert(#view:visibleItems() == 4)
 assert(page_events[#page_events].page == 5)
 
+view.options.row_key=function(item) return item.vol_name end
+view:_changePage(2)
+local old_first=view:visibleItems()[1]
+local refreshed={}
+for index=1,8 do refreshed[#refreshed+1]={vol_name="New "..index} end
+for _,item in ipairs(books) do refreshed[#refreshed+1]={vol_name=item.vol_name} end
+view:update{books=refreshed,preserve_anchor=true,page=2}
+assert(view.page==3,"refresh insertion must preserve the old first identity, not just its page number")
+local found=false
+for _,item in ipairs(view:visibleItems()) do if item.vol_name==old_first.vol_name then found=true end end
+assert(found,"stable refresh anchor must remain visible despite fresh table identities")
+view:update{books=books,preserve_anchor=false,page=2}
+assert(view.page==2,"ordinary navigation must not inherit refresh anchoring")
+local rotation_first=view:visibleItems()[1].vol_name
+view.options.ui={portrait_columns=2,portrait_rows=2}
+view:onRotation()
+assert(view:visibleItems()[1].vol_name==rotation_first,"layout reflow must preserve the visible identity")
+view:update{ui={portrait_columns=3,portrait_rows=2},page=2,preserve_anchor=false}
+
 view:update{ books = { books[1], books[2] } }
 assert(view.page == 1)
 assert(view.pages == 1)

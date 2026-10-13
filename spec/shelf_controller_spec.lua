@@ -92,4 +92,11 @@ download_action.callback();assert(#queued==2)
 current.on_view("volumes");current.on_hold(books[1]);current.on_select(books[2])
 assert(type(current.on_selection_download)=="function")
 current.on_selection_download();assert(#queued==2 and queued[1].file_md5=="a")
+local refresh_done
+shelf.library.refreshAsync=function(_,done) refresh_done=done;return {} end
+shelf:refresh();refresh_done(books)
+assert(current.preserve_anchor==true and current.row_key(books[1])~=current.row_key(books[2]),
+    "production catalog refresh must explicitly preserve a stable account-aware grid anchor")
+current.on_view("series")
+assert(not current.preserve_anchor,"view switching must retain its own navigation memory")
 print("shelf controller spec: OK")

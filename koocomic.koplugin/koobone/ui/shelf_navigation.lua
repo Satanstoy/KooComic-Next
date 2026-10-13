@@ -28,6 +28,12 @@ function Navigation:setBooks(books)
     self:back()
 end
 
+function Navigation:rowKey(item)
+    if item._series then return Entry.key(self.account_id,"series",item._series.key) end
+    local entry=Entry.normalize(self.account_id,item)
+    return entry and entry.id
+end
+
 function Navigation:_state()
     return {page=self.page, query=self.query, sort_mode=self.sort_mode, filter_mode=self.filter_mode}
 end

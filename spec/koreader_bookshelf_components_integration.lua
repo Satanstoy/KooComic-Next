@@ -53,5 +53,19 @@ for _,style in ipairs({"divider","ribbon","stack","collage","text","none"}) do
     assert(ink>10,"style did not render visible content: "..style)
     shelf:_close();canvas:free()
 end
+local volumes={}
+for index=1,30 do volumes[index]={file_md5=tostring(index),vol_name="Generated "..index} end
+local shelf=Grid.show{books=volumes,mode="volumes",row_key=function(item) return item.file_md5 end,
+    storage={isDownloaded=function() return false end,partSize=function() return 0 end}}
+shelf:_changePage(2)
+local first=shelf:visibleItems()[1].file_md5
+local replacement={}
+for index=1,9 do replacement[#replacement+1]={file_md5="new-"..index,vol_name="Inserted "..index} end
+for _,item in ipairs(volumes) do replacement[#replacement+1]={file_md5=item.file_md5,vol_name=item.vol_name} end
+shelf:update{books=replacement,preserve_anchor=true,page=2}
+local found=false
+for _,item in ipairs(shelf:visibleItems()) do if item.file_md5==first then found=true end end
+assert(found and shelf.page>2,"native refresh must locate the prior stable identity across insertion")
+shelf:_close()
 Device:exit()
 print("KOReader imported Bookshelf component integration: OK")
