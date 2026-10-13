@@ -50,6 +50,10 @@ function KooComic:init()
         directory=DataStorage:getSettingsDir().."/koocomic-catalog"},account=function() return self.settings:account().uin end})
     self.preprocess = PreprocessService:get{storage=self.storage,
         profile_provider=function() return self.settings.data.preprocess end,
+        on_batch=function(result)
+            UIManager:show(InfoMessage:new{text=string.format("去彩纹完成 %d，已优化跳过 %d，失败 %d，取消 %d，其他跳过 %d。",
+                result.completed,result.optimized,result.failed,result.cancelled,result.skipped)})
+        end,
         directory=DataStorage:getSettingsDir().."/koocomic-preprocess"}
     self.storage.preprocess = self.preprocess
     self.download_service=DownloadService:new{settings=self.settings,api=self.api,library=self.library,storage=self.storage,
@@ -93,7 +97,7 @@ function KooComic:init()
         settings = self.settings,
         cover_cache = self.cover_cache,
         preprocess = self.preprocess,
-        on_preprocess = function() PreprocessUI.show(self.storage,self.preprocess) end,
+        on_preprocess = function() self:showPreprocess() end,
         on_downloads = function() self:showDownloads() end,
         on_account = function() self:showAccount() end,
         on_settings = function() self:showSettings() end,
@@ -125,7 +129,7 @@ function KooComic:addToMainMenu(menu_items)
             },
             {
                 text = "图像优化 / 去彩纹管理",
-                callback = function() PreprocessUI.show(self.storage,self.preprocess) end,
+                callback = function() self:showPreprocess() end,
             },
             {
                 text = "账号与登录",
@@ -153,6 +157,10 @@ function KooComic:addToMainMenu(menu_items)
             },
         },
     }
+end
+
+function KooComic:showPreprocess()
+    return PreprocessUI.show(self.storage,self.preprocess,{settings=self.settings,library=self.library,cover_cache=self.cover_cache})
 end
 
 function KooComic:ensureOnline(callback)

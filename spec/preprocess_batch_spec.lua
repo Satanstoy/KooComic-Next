@@ -30,4 +30,8 @@ service.queue.resume=function(self) self.paused=false;return true end
 service.queue.tick=function() return nil,"idle" end
 assert(service:resume());table.remove(tasks,1)()
 assert(not service.running and #tasks==0,"finished processing queues must stop polling instead of waking an idle device at 5 Hz")
+service.profile_provider=function() return {strength=0.6} end
+local before=#service.requests
+assert(not service:submitBatch({{file_md5="changed-controls"}},preview.profile) and #service.requests==before,
+    "changed controls must require a new confirmation rather than apply a different profile")
 print("preprocess batch spec: OK")

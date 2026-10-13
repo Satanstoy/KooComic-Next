@@ -71,6 +71,8 @@ jobs:
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_settings_integration.lua" "$GITHUB_WORKSPACE"
           SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-http-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_download_transport_integration.lua" "$GITHUB_WORKSPACE"
           SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_download_queue_ui_integration.lua" "$GITHUB_WORKSPACE"
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_preprocess_manager_ui_integration.lua" "$GITHUB_WORKSPACE" 600 800
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_preprocess_manager_ui_integration.lua" "$GITHUB_WORKSPACE" 1024 758
 
       - name: Build a test release package
         shell: bash

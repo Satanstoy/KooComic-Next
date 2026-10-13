@@ -27,6 +27,8 @@ function Bookshelf:new(options)
         on_downloads = options.on_downloads,
         on_account = options.on_account,
         on_settings = options.on_settings,
+        on_book_select=options.on_book_select,
+        decorate_grid=options.decorate_grid,
         query = "",
         sort_mode = "recent",
         filter_mode = "all",
@@ -157,7 +159,7 @@ function Bookshelf:_gridOptions(books)
     local nav = self.navigation
     nav.query, nav.sort_mode, nav.filter_mode = self.query, self.sort_mode, self.filter_mode
     books = nav:items(books)
-    return {
+    local grid_options={
         books = books,
         storage = self.storage,
         account = self.settings:account(),
@@ -200,6 +202,7 @@ function Bookshelf:_gridOptions(books)
                 return
             end
             if self.selection.active then self.selection:toggle(item);self:_render();return end
+            if self.on_book_select then self.on_book_select(item);return end
             BookDetail.show{
                 item = item,
                 storage = self.storage,
@@ -220,6 +223,7 @@ function Bookshelf:_gridOptions(books)
             self:_prefetchCovers(items)
         end,
     }
+    return self.decorate_grid and self.decorate_grid(grid_options) or grid_options
 end
 
 function Bookshelf:_items(books)

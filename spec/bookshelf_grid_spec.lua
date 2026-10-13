@@ -185,6 +185,12 @@ assert(find(view,function(widget) return widget.description=="加入下载队列
 view:update{selected_count=0,on_selection_delete=function() error("empty selection deletion") end}
 local empty_delete=find(view,function(widget) return widget.description=="删除本地" end)
 assert(not empty_delete.callback,"disabled empty-selection delete must not retain a tap callback")
+view:update{selection_delete_enabled=false,selection_action_icon="preprocess",status_for=function() return "处理中" end,
+    tabs={{id="series",label="系列"},{id="volumes",label="单卷"},{id="downloaded",label="已处理"}}}
+assert(view.chrome.tabs[3].label=="已处理" and find(view,function(widget) return widget.text=="处理中" end),
+    "processing management must reuse grid chrome with domain-specific tabs and states")
+assert(not find(view,function(widget) return widget.description=="删除本地" end) and
+    find(view,function(widget) return widget.description=="去彩纹处理" end),"processing selection must not expose download/delete tools")
 view:onBack()
 assert(view.closed == true)
 

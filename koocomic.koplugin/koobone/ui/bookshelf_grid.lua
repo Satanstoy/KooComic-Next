@@ -348,7 +348,9 @@ local function bookCard(item, width, height, storage, callback, ui, controls)
     local downloaded = storage:isDownloaded(item)
     local partial = storage:partSize(item)
     local badge_text
-    if not item._series and downloaded then
+    if not item._series and controls.status_for then
+        badge_text=controls.status_for(item)
+    elseif not item._series and downloaded then
         badge_text = "已下载"
     elseif not item._series and partial > 0 then
         badge_text = "未完成"
@@ -373,7 +375,7 @@ local function bookCard(item, width, height, storage, callback, ui, controls)
             x_off=math.max(0,math.floor(ribbon/2)+cover_w-count:getSize().w),y_off=0,count} end
         if item._series.downloaded_count > 0 then
             cover_layers[#cover_layers+1] = OffsetContainer:new{x_off=dp(4),y_off=dp(4),
-                badge("↓"..tostring(item._series.downloaded_count),dp(38),dp(24))}
+                badge((controls.series_count_prefix or "↓")..tostring(item._series.downloaded_count),dp(38),dp(24))}
         end
     end
     if badge_text then
@@ -466,7 +468,7 @@ function GridShelf:_buildChrome(layers, layout)
         return button
     end
     header[#header+1] = iconButton("back",action_w,header_h,function() self:onBack() end)
-    for _, tab in ipairs({{id="series",label="系列"},{id="volumes",label="单卷"},{id="downloaded",label="已下载"}}) do
+    for _, tab in ipairs(self.options.tabs or {{id="series",label="系列"},{id="volumes",label="单卷"},{id="downloaded",label="已下载"}}) do
         local selected = (self.options.mode or "series") == tab.id
         local callback = function() if self.options.on_view then self.options.on_view(tab.id) end end
         local button = tappable(tab_w,header_h,
@@ -483,15 +485,16 @@ function GridShelf:_buildChrome(layers, layout)
     local side = math.max(dp(40),footer_h)
     if self.options.selection_active then
         self.chrome.selection=true
+        local has_delete=self.options.selection_delete_enabled~=false
         local footer=HorizontalGroup:new{
             iconButton("menu",side,footer_h,self.options.on_selection_more),
             iconButton("previous",side,footer_h,self.page>1 and function() self:_changePage(self.page-1) end or nil,self.page<=1),
-            singleLine("已选 "..tostring(self.options.selected_count or 0),width-side*6,footer_h,14,{}),
+            singleLine("已选 "..tostring(self.options.selected_count or 0),width-side*(has_delete and 6 or 5),footer_h,14,{}),
             iconButton("next",side,footer_h,self.page<self.pages and function() self:_changePage(self.page+1) end or nil,self.page>=self.pages),
-            iconButton("enqueue",side,footer_h,self.options.on_selection_download,(self.options.selected_count or 0)==0),
-            iconButton("delete",side,footer_h,self.options.on_selection_delete,(self.options.selected_count or 0)==0),
-            iconButton("cancel",side,footer_h,self.options.on_selection_cancel),
+            iconButton(self.options.selection_action_icon or "enqueue",side,footer_h,self.options.on_selection_download,(self.options.selected_count or 0)==0),
         }
+        if has_delete then footer[#footer+1]=iconButton("delete",side,footer_h,self.options.on_selection_delete,(self.options.selected_count or 0)==0) end
+        footer[#footer+1]=iconButton("cancel",side,footer_h,self.options.on_selection_cancel)
         self:_add(layers,0,layout.footer.y,footer)
         return
     end
@@ -511,7 +514,7 @@ function GridShelf:_buildChrome(layers, layout)
     footer[#footer+1] = singleLine(tostring(self.page).." / "..tostring(self.pages),middle,footer_h,12,{})
     arrow("next",self.page+1,self.page<self.pages)
     if not narrow then arrow("last",self.pages,self.page<self.pages) end
-    footer[#footer+1] = iconButton("downloads",side,footer_h,self.options.on_downloads)
+    footer[#footer+1] = iconButton(self.options.queue_icon or "downloads",side,footer_h,self.options.on_downloads)
     self:_add(layers,0,layout.footer.y,footer)
 end
 
@@ -652,6 +655,7 @@ function GridShelf:_build()
             bookCard(item,rect.w,rect.h,self.options.storage,function()
                 if self.options.on_select then self.options.on_select(item) end
             end,self.options.ui,{selected=self.options.is_selected and self.options.is_selected(item),
+                status_for=self.options.status_for,series_count_prefix=self.options.series_count_prefix,
                 on_hold=function() if self.options.on_hold then self.options.on_hold(item)
                     elseif self.options.on_select then self.options.on_select(item) end end}))
         slot = slot + 1

@@ -12,4 +12,17 @@ disabled.profile_provider=function() return {strength=0.6,scale_mode="fit",targe
 profile=assert(disabled:profile());assert(profile.strength==0.6 and profile.target_width==600)
 disabled.profile_provider=function() return {strength=math.huge} end
 assert(not disabled:profile())
+local shared=Service:get{storage={},directory="/not-created-shared"}
+local callback=function() end
+assert(Service:get{storage={},directory="/not-created-shared",on_batch=callback}==shared and shared.on_batch==callback,
+    "reinitialization must bind batch results to the current plugin instance")
+local notifications=0
+assert(type(shared.subscribe)=="function","idle views need persisted-state notifications to resume watching")
+local unsubscribe=shared:subscribe(function() notifications=notifications+1 end)
+shared.files={writeJSON=function() return true end};shared.queue={snapshot=function() return {} end}
+assert(shared:_save());assert(notifications==1)
+unsubscribe();assert(shared:_save());assert(notifications==1)
+shared:subscribe(function() notifications=notifications+1 end)
+shared.files.writeJSON=function() return nil,"failed" end
+assert(not shared:_save());assert(notifications==1,"failed persistence must not publish a state update")
 print("preprocess service spec: OK")

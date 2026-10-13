@@ -177,6 +177,10 @@ assert(instance.download_service and instance.downloader.service==instance.downl
     "production main must bind the isolated queue instead of the legacy synchronous downloader")
 instance.settings.data.preprocess.strength=0.6
 assert(instance.preprocess:profile().strength==0.6,"production preprocessing must use persisted user controls")
+local management_called=false
+instance.showPreprocess=function() management_called=true end
+instance.bookshelf.on_preprocess()
+assert(management_called,"native shelf menu must route through the production processing management entry")
 assert(instance.settings ~= nil)
 assert(instance.downloader ~= nil)
 assert(instance.updater ~= nil)

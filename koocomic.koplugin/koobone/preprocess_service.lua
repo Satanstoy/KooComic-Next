@@ -24,6 +24,7 @@ function Service:get(options)
     if existing then
         existing.storage=options.storage
         if options.profile_provider then existing.profile_provider=options.profile_provider end
+        if options.on_batch then existing.on_batch=options.on_batch end
         return existing
     end
     local service=self:new(options)
@@ -34,7 +35,7 @@ end
 function Service:new(options)
     local self=setmetatable({storage=options.storage,directory=options.directory,requests={},next_id=1,
         profile_provider=options.profile_provider or function() return {} end,
-        space=options.space,reserve=64*1024*1024,on_batch=options.on_batch,
+        space=options.space,reserve=64*1024*1024,on_batch=options.on_batch,listeners={},
         available=false,running=false,retain_original=options.retain_original==true,
         coordinator=options.coordinator or Coordinator:new()},Service)
     local loaded,err=pcall(function()
@@ -132,8 +133,15 @@ function Service:new(options)
 end
 
 function Service:_save(snapshot)
-    return self.files:writeJSON(self.state_path,{schema_version=1,requests=self.requests,
+    local ok,err=self.files:writeJSON(self.state_path,{schema_version=1,requests=self.requests,
         queue=snapshot or self.queue:snapshot(),batch=self.batch})
+    if ok then for callback in pairs(self.listeners) do pcall(callback) end end
+    return ok,err
+end
+
+function Service:subscribe(callback)
+    self.listeners[callback]=true
+    return function() self.listeners[callback]=nil end
 end
 
 function Service:jobs()
@@ -236,8 +244,15 @@ function Service:previewBatch(items)
     return result
 end
 
-function Service:submitBatch(items)
+function Service:submitBatch(items,expected_profile)
     local preview,err=self:previewBatch(items);if not preview then return nil,err end
+    if expected_profile~=nil then
+        local function key(profile)
+            return Identity.key{book_id="profile",source_fingerprint="controls",algorithm_version="kissfft-f2892a2-v1",profile=profile}
+        end
+        local expected=key(expected_profile)
+        if not expected or expected~=key(preview.profile) then return nil,"处理参数已变化，请重新确认" end
+    end
     local counts={added=preview.files,duplicate=preview.duplicate,occupied=preview.occupied,invalid=preview.invalid}
     if preview.files==0 then return counts end
     local initial,next_id,previous=#self.requests,self.next_id,self.batch
@@ -259,11 +274,14 @@ end
 function Service:batchSummary()
     local result={completed=0,optimized=0,failed=0,cancelled=0,pending=0,skipped=0}
     if not self.batch then return result end
+    local jobs,requests={},{}
+    for _,job in ipairs(self.queue.jobs) do jobs[job.id]=job end
+    for _,request in ipairs(self.requests) do requests[request.id]=request end
     for _,field in ipairs({"duplicate","occupied","invalid"}) do result.skipped=result.skipped+self.batch.stats[field] end
     for _,member in ipairs(self.batch.members) do
         local state
-        if member.job_id then for _,job in ipairs(self.queue.jobs) do if job.id==member.job_id then state=job.state;break end end end
-        if not state then for _,request in ipairs(self.requests) do if request.id==member.request_id then state=request.state;break end end end
+        if member.job_id and jobs[member.job_id] then state=jobs[member.job_id].state end
+        if not state and requests[member.request_id] then state=requests[member.request_id].state end
         if state=="completed" then result.completed=result.completed+1
         elseif state=="skipped" then result.optimized=result.optimized+1
         elseif state=="failed" or not state then result.failed=result.failed+1
