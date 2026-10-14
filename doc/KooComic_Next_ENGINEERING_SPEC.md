@@ -5,6 +5,7 @@
 > KooComic 基线：`a97f8d3`；视觉参考：AndyHazz/bookshelf.koplugin `2c8bfd8e53b73b24232e674e12ebc6168963aef5`。
 > 本修订整合 Bookshelf 组件复用与用户新增的独立离线去彩纹需求。允许按 TDD 分阶段实施；具体 UI 尺寸、原生 ABI、Colorsoft 画质和性能仍须验证，不表示全部能力已实现。
 > 下一轮所有剩余项及最新执行证据见 [第二轮规格](KooComic_Next_ROUND2_SPEC.md)。
+> 2026-10-14 最新离机结果见 [19项验收总表](offline-alignment-status.md)：软件、自动测试和实验构建已对齐；设备/真实服务及发行门槛仍未通过。此前状态表是历史基线。
 
 ## 1. 目标与范围
 
