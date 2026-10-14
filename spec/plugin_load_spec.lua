@@ -16,6 +16,8 @@ local function class()
 end
 
 local Widget = class()
+local scheduled, shown = {}, {}
+local defer_network, waiting = false, {}
 local noop_widget_modules = {
     "ui/widget/buttondialog",
     "ui/widget/checkbutton",
@@ -47,21 +49,23 @@ package.preload["ui/gesturerange"] = function() return Widget end
 
 package.preload["datastorage"] = function()
     return {
-        getSettingsDir = function() return "/tmp" end,
+        getSettingsDir = function() return "./settings" end,
         getDataDir = function() return "/tmp" end,
         getFullDataDir = function() return "/tmp/koreader" end,
     }
 end
 package.preload["ui/network/manager"] = function()
     return {
-        runWhenOnline = function(_, callback) callback() end,
+        runWhenOnline = function(_, callback)
+            if defer_network then waiting[#waiting + 1] = callback else callback() end
+        end,
         isConnected = function() return false end,
     }
 end
 package.preload["ui/uimanager"] = function()
     return {
-        scheduleIn = function() end,
-        show = function() end,
+        scheduleIn = function(_, _, callback) scheduled[#scheduled + 1] = callback end,
+        show = function(_, widget) shown[#shown + 1] = widget end,
         close = function() end,
         setDirty = function() end,
         forceRePaint = function() end,
@@ -108,6 +112,8 @@ end
 package.preload["libs/libkoreader-lfs"] = function()
     return {
         attributes = function() return nil end,
+        symlinkattributes = function() return nil end,
+        currentdir = function() return "/workspace" end,
         mkdir = function() return true end,
     }
 end
@@ -155,19 +161,94 @@ package.preload["luasettings"] = function()
     }
     return { open = function() return handle end }
 end
+package.preload["koobone.settings_store"]=function() return {new=function() return {
+    load=function() return nil end,save=function() return true end,
+} end} end
 
 G_reader_settings = {
     readSetting = function() return "/tmp" end,
 }
 
 local Plugin = dofile("koocomic.koplugin/main.lua")
+assert(debug.getinfo(Plugin.init,"S").source:find("koobone/plugin.lua",1,true),
+    "the root entry must defer application imports until update recovery has run")
 assert(Plugin.version == "0.4.1")
 local instance = Plugin:new{
     ui = { menu = { registerToMainMenu = function() end } },
 }
 instance:init()
+assert(instance.settings.path=="/workspace/settings/koocomic.lua",
+    "portable relative settings directory must resolve without moving legacy files")
+assert(instance.download_service and instance.downloader.service==instance.download_service,
+    "production main must bind the isolated queue instead of the legacy synchronous downloader")
+instance.settings.data.preprocess.strength=0.6
+assert(instance.preprocess:profile().strength==0.6,"production preprocessing must use persisted user controls")
+local management_called=false
+instance.showPreprocess=function() management_called=true end
+instance.bookshelf.on_preprocess()
+assert(management_called,"native shelf menu must route through the production processing management entry")
 assert(instance.settings ~= nil)
 assert(instance.downloader ~= nil)
 assert(instance.updater ~= nil)
+
+local menu = {}
+instance:addToMainMenu(menu)
+local probe_action
+local preprocess_action
+for _, action in ipairs(menu.koocomic.sub_item_table) do
+    if action.text == "书库能力探测（只读）" then probe_action = action end
+    if action.text == "图像优化 / 去彩纹管理" then preprocess_action = action end
+end
+assert(preprocess_action and instance.preprocess, "independent preprocessing is not connected to the actual plugin")
+assert(probe_action, "the read-only catalog probe menu is not implemented")
+local limits = {}
+instance.auth.restore = function() return true end
+instance.api.library = function(_, limit)
+    limits[#limits + 1] = limit
+    return { data = {} }
+end
+probe_action.callback()
+scheduled[#scheduled]()
+assert(#limits == 3 and limits[1] == 28 and limits[3] == 100)
+assert(shown[#shown].text:find("尚未确认", 1, true))
+instance.auth.restore = function() return nil, "private auth error" end
+probe_action.callback()
+scheduled[#scheduled]()
+assert(#limits == 3, "probe must not request a private catalog after failed authentication")
+assert(not shown[#shown].text:find("private", 1, true))
+defer_network = true
+local before = #scheduled
+probe_action.callback()
+probe_action.callback()
+assert(#waiting == 2)
+waiting[1]()
+waiting[2]()
+assert(#scheduled == before + 1, "deferred online callbacks must not schedule duplicate probes")
+instance.auth.restore = function() error("private auth exception") end
+scheduled[#scheduled]()
+assert(instance.catalog_probe_running == false, "failed probes must release the running guard")
+assert(not shown[#shown].text:find("private", 1, true))
+
+local cached={{vol_name="Offline original",file_md5="offline"}}
+local cache_shown=false
+instance.settings:account().uin=42
+instance.settings:account().vlibsid="fixture-session"
+instance.library.loadCache=function() return cached end
+instance.bookshelf.show=function(_,books) assert(books==cached);cache_shown=true end
+instance.bookshelf.refresh=function() error("offline opening must not start a network sync") end
+instance.auth.restore=function() error("offline cache must not require live authentication") end
+instance:openBookshelf()
+assert(cache_shown,"the production entry must show cache before asking for a connection")
+local account_options
+require("koobone.ui.account").show=function(options) account_options=options end
+instance.library.items=cached
+instance:showAccount()
+account_options.on_logout()
+assert(#instance.library.items==0,"logout must clear remote in-memory catalog and pending requests")
+instance.updater.restart_required=true
+local reopened=false
+instance.bookshelf.show=function() reopened=true end
+instance:openBookshelf()
+assert(not reopened and shown[#shown].text:find("重启",1,true),"installed code must not start old in-memory reading/download workflows before restart")
 
 print("plugin load spec: OK")

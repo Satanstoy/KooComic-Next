@@ -27,7 +27,7 @@ jobs:
       - name: Install Lua 5.1
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua5.1
+          sudo apt-get install --yes lua5.1 qemu-user zstd dosfstools
 
       - name: Check for sensitive runtime files
         shell: bash
@@ -49,6 +49,75 @@ jobs:
             lua5.1 "${spec_file}"
           done
 
+      - name: Build and test host preprocessing prototype
+        run: |
+          python3 spec/release_package_spec.py
+          make -C native/preprocess
+          make -C native/preprocess smoke
+          python3 spec/native_preprocess_spec.py
+
+      - name: Verify real EPUB processing in the official KOReader runtime
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 https://github.com/koreader/koreader/releases/download/v2026.07.1/koreader-linux-x86_64-v2026.07.1.tar.xz -o /tmp/koreader.tar.xz
+          printf '%s  /tmp/koreader.tar.xz\n' 299aadb28147a25e9432ced1214ea444a4184393b5ae97cf42402c8a61b1a1b0 | sha256sum -c -
+          mkdir -p /tmp/koreader-runtime /tmp/koocomic-epub-test
+          tar -xf /tmp/koreader.tar.xz -C /tmp/koreader-runtime
+          cd /tmp/koreader-runtime/lib/koreader
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_epub_integration.lua" "$GITHUB_WORKSPACE" /tmp/koocomic-epub-test
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_file_faults_integration.lua" "$GITHUB_WORKSPACE"
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-components ./luajit "$GITHUB_WORKSPACE/spec/koreader_bookshelf_components_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_catalog_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_local_manager_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_download_queue_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_settings_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_update_package_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_update_transaction_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_update_bootstrap_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_atomic_fallback_integration.lua" "$GITHUB_WORKSPACE"
+          SDL_VIDEODRIVER=dummy ./luajit "$GITHUB_WORKSPACE/spec/koreader_portable_paths_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_archive_crc_integration.lua" "$GITHUB_WORKSPACE"
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-http-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_download_transport_integration.lua" "$GITHUB_WORKSPACE"
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_download_queue_ui_integration.lua" "$GITHUB_WORKSPACE"
+          for size in "600 800" "800 600" "758 1024" "1024 758"; do
+            SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_navigation_integration.lua" "$GITHUB_WORKSPACE" $size
+            SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_ui_matrix_integration.lua" "$GITHUB_WORKSPACE" $size
+            for font in normal large; do
+              for mode in "gray day" "gray night" "rgb day" "rgb night"; do
+                SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_preprocess_manager_ui_integration.lua" "$GITHUB_WORKSPACE" $size $font $mode
+                SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_book_versions_ui_integration.lua" "$GITHUB_WORKSPACE" $size $font $mode
+              done
+            done
+          done
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_shelf_layout_update_integration.lua" "$GITHUB_WORKSPACE"
+          for size in "600 800 167" "1072 1448 300" "1264 1680 300" "1448 1072 300"; do
+            SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-settings-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_settings_screen_integration.lua" "$GITHUB_WORKSPACE" $size
+          done
+          git clone --filter=blob:none --no-checkout https://github.com/AndyHazz/bookshelf.koplugin.git /tmp/bookshelf-reference
+          git -C /tmp/bookshelf-reference checkout --detach 2c8bfd8e53b73b24232e674e12ebc6168963aef5
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-visual-reference ./luajit "$GITHUB_WORKSPACE/spec/koreader_bookshelf_visual_comparison.lua" "$GITHUB_WORKSPACE" /tmp/bookshelf-reference
+          for size in "600 800" "800 600" "758 1024" "1024 758"; do
+            SDL_VIDEODRIVER=dummy KO_HOME="/tmp/koocomic-screen-reference-$size" ./luajit "$GITHUB_WORKSPACE/spec/koreader_bookshelf_screen_comparison.lua" "$GITHUB_WORKSPACE" /tmp/bookshelf-reference /tmp/koocomic-five-state-final $size final
+          done
+          for order in bookshelf-first koocomic-first; do
+            SDL_VIDEODRIVER=dummy KO_HOME="/tmp/koocomic-coexist-$order" ./luajit "$GITHUB_WORKSPACE/spec/koreader_bookshelf_coexistence_integration.lua" "$GITHUB_WORKSPACE" /tmp/bookshelf-reference "$order"
+          done
+
+      - name: Verify atomic commits on a real FAT filesystem
+        run: |
+          sudo modprobe loop || true
+          ./scripts/verify_atomic_filesystem.sh /tmp/koreader-runtime/lib/koreader "$GITHUB_WORKSPACE" vfat
+
+      - name: Verify colour package and the single release package with native filters
+        run: |
+          python3 spec/colorsoft_package_spec.py
+          python3 scripts/package_native.py --output /tmp/koocomic-native --channel stable
+          version="$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' koocomic.koplugin/_meta.lua)"
+          KOOC_NATIVE_DIR=/tmp/koocomic-native ./scripts/package_release.sh "${version}" "${GITHUB_REPOSITORY}" dist-native-ci
+          unzip -tq dist-native-ci/release/koocomic.koplugin-*.zip
+          unzip -l dist-native-ci/release/koocomic.koplugin-*.zip | grep -q "native/moire-kindlehf.so"
+          unzip -l dist-native-ci/release/koocomic.koplugin-*.zip | grep -q "native/moire-kobo.so"
+
       - name: Build a test release package
         shell: bash
         run: |
@@ -63,3 +132,11 @@ jobs:
           shasum -a 256 -c koocomic.koplugin-*.zip.sha256
           python3 -m json.tool update.json >/dev/null
           test -s release-notes.md
+
+      - name: Verify full-package upgrade and rollback in KOReader
+        shell: bash
+        run: |
+          packages=("$GITHUB_WORKSPACE"/dist-ci/release/koocomic.koplugin-v*.zip)
+          test "${#packages[@]}" -eq 1
+          cd /tmp/koreader-runtime/lib/koreader
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-installer-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_updater_install_integration.lua" "$GITHUB_WORKSPACE" "${packages[0]}"

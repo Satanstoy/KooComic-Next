@@ -2,6 +2,7 @@ local DataStorage = require("datastorage")
 local ffiUtil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
 local Util = require("koobone.util")
+local Guard = require("koobone.runtime_guard")
 
 local Storage = {}
 Storage.__index = Storage
@@ -72,7 +73,56 @@ function Storage:partPath(item)
 end
 
 function Storage:isDownloaded(item)
-    return lfs.attributes(self:itemPath(item), "mode") == "file"
+    return self:resolveLocalPath(item) ~= nil
+end
+
+function Storage:isSafeLocalPath(path)
+    if type(path) ~= "string" or path:sub(1, 1) ~= "/" or path:find("[%c]") then return false end
+    local root = self:downloadDir():gsub("/+$", "")
+    if path:sub(1, #root + 1) ~= root .. "/" or path:find("//", 1, true) then return false end
+    if not lfs.symlinkattributes then return false end
+    local prefix = ""
+    for component in path:gmatch("[^/]+") do
+        if component == "." or component == ".." then return false end
+        prefix = prefix .. "/" .. component
+        if lfs.symlinkattributes(prefix, "mode") == "link" then return false end
+    end
+    return true
+end
+
+function Storage:_recordPath(item)
+    local records = self.settings:download().records
+    local key = self:itemKey(item)
+    local record = records[key]
+    local path = record and record.path or self:itemPath(item)
+    if not self:isSafeLocalPath(path) then return nil, "invalid_path" end
+    for other_key, other in pairs(records) do
+        if other_key ~= key and type(other) == "table" and other.path == path then
+            return nil, "conflict"
+        end
+    end
+    return path, record and "recorded" or "new"
+end
+
+function Storage:resolveDownloadPath(item)
+    local path, state = self:_recordPath(item)
+    if not path then return nil, state end
+    local part_path = path .. ".part"
+    if not self:isSafeLocalPath(part_path) then return nil, "invalid_path" end
+    for key, record in pairs(self.settings:download().records) do
+        if key ~= self:itemKey(item) and type(record) == "table" and
+                (record.path == part_path or record.part_path == part_path) then
+            return nil, "conflict"
+        end
+    end
+    return path, state
+end
+
+function Storage:resolveLocalPath(item)
+    local path, state = self:_recordPath(item)
+    if not path then return nil, state end
+    if fileMode(path) == "file" then return path, "downloaded" end
+    return nil, state == "recorded" and "missing" or "not_downloaded"
 end
 
 function Storage:fileSize(path)
@@ -88,11 +138,12 @@ function Storage:partSize(item)
 end
 
 function Storage:record(item, state, extra)
+    if not Guard.ensure() then return nil,Guard.reason end
     local records = self.settings:download().records
     local key = self:itemKey(item)
     local value = records[key] or {}
     value.title = item.vol_name or item.vol_series or ""
-    value.path = self:itemPath(item)
+    value.path = value.path or self:itemPath(item)
     value.state = state
     value.updated_at = os.time()
     if state == "preparing" or state == "downloading" or state == "complete" then
@@ -141,6 +192,7 @@ function Storage:recordInfo(row)
 end
 
 function Storage:removeRecord(key)
+    if not Guard.ensure() then return nil,Guard.reason end
     local records = self.settings:download().records
     if key == nil or records[key] == nil then return true, false end
     records[key] = nil
@@ -149,20 +201,78 @@ function Storage:removeRecord(key)
 end
 
 function Storage:_deleteRecordFiles(key, final_path, part_path, delete_final, delete_part)
-    local removed_bytes = 0
+    if not Guard.ensure() then return nil,Guard.reason end
+    if delete_final and not self:isSafeLocalPath(final_path) then return nil,"阅读文件路径不安全" end
+    if delete_part and (not self:isSafeLocalPath(part_path) or not part_path:lower():match("%.part$")) then
+        return nil,"临时文件路径不安全"
+    end
     if delete_final then
-        local ok, size_or_err = removeFile(final_path)
+        local reader
+        if self.is_in_use then reader=self.is_in_use(final_path)
+        else
+            local loaded,ReaderUI=pcall(require,"apps/reader/readerui")
+            reader=loaded and ReaderUI.instance and ReaderUI.instance.document and ReaderUI.instance.document.file==final_path
+        end
+        if reader then return nil,"漫画正在阅读，请先关闭阅读器" end
+    end
+    if self.preprocess and (self.preprocess:isLocked(final_path) or self.preprocess:isLocked(part_path)) then
+        return nil,"这本漫画正在处理，请先取消并等待任务结束。"
+    end
+    local removed_bytes,removed_files = 0,0
+    if delete_final then
+        local ok, size_or_err,removed = removeFile(final_path)
         if not ok then return nil, size_or_err end
         removed_bytes = removed_bytes + (tonumber(size_or_err) or 0)
+        if removed then removed_files=removed_files+1 end
+        if self.preprocess and self.preprocess.cleanup then
+            local called,cleaned,bytes=pcall(self.preprocess.cleanup,self.preprocess,final_path)
+            if not called or not cleaned then return nil,"阅读文件已删除，内部备份清理失败："..tostring(called and bytes or cleaned),
+                {bytes=removed_bytes,files=removed_files,lower_bound=true} end
+            removed_bytes=removed_bytes+(tonumber(bytes) or 0)
+        end
     end
     if delete_part then
         local ok, size_or_err = removeFile(part_path)
         if not ok then return nil, size_or_err end
         removed_bytes = removed_bytes + (tonumber(size_or_err) or 0)
     end
-    if key ~= nil then self.settings:download().records[key] = nil end
-    self.settings:flush()
-    return true, removed_bytes
+    if key ~= nil then
+        local record=self.settings:download().records[key]
+        if not delete_part and record and fileMode(part_path)=="file" then record.state="interrupted"
+        else self.settings:download().records[key] = nil end
+    end
+    local saved,save_error=pcall(self.settings.flush,self.settings)
+    if not saved then return nil,"文件删除后记录保存失败："..tostring(save_error),
+        {files=removed_files,bytes=removed_bytes,lower_bound=true} end
+    return true, removed_bytes,{files=removed_files,bytes=removed_bytes}
+end
+
+function Storage:fileIdentity(path)
+    if not self:isSafeLocalPath(path) or fileMode(path)~="file" or (lfs.attributes(path,"nlink") or 1)>1 then return nil end
+    local values={path}
+    for _,field in ipairs({"dev","ino","size","modification","change"}) do
+        values[#values+1]=tostring(lfs.attributes(path,field) or "")
+    end
+    return table.concat(values,"|")
+end
+
+function Storage:localDeleteInfo(item)
+    local key=self:itemKey(item)
+    local record=self.settings:download().records[key]
+    if type(record)~="table" or type(record.path)~="string" then return nil,"漫画没有可信的本地索引" end
+    if not record.path:lower():match("%.epub$") then return nil,"只允许批量删除已索引 EPUB" end
+    local path,state=self:resolveLocalPath(item)
+    if not path then return nil,state end
+    local identity=self:fileIdentity(path)
+    if not identity then return nil,"本地文件身份不安全" end
+    return {key=key,path=path,identity=identity,size=self:fileSize(path),title=record.title or item.vol_name or ""}
+end
+
+function Storage:deleteIndexedLocal(expected)
+    local record=self.settings:download().records[expected.key]
+    if type(record)~="table" or record.path~=expected.path or not expected.path:lower():match("%.epub$") or
+            self:fileIdentity(expected.path)~=expected.identity then return nil,"文件已变化，请重新确认" end
+    return self:_deleteRecordFiles(expected.key,expected.path,record.part_path or (expected.path..".part"),true,false)
 end
 
 function Storage:deleteItem(item)
@@ -223,6 +333,7 @@ function Storage:maintenanceSummary()
 end
 
 function Storage:cleanupMissingRecords()
+    if not Guard.ensure() then return 0,Guard.reason end
     local records = self.settings:download().records
     local removed = 0
     for key, value in pairs(records) do
@@ -237,6 +348,7 @@ function Storage:cleanupMissingRecords()
 end
 
 function Storage:cleanupPartialFiles()
+    if not Guard.ensure() then return {files=0,bytes=0,errors={Guard.reason}} end
     local records = self.settings:download().records
     local removed_files, removed_bytes = 0, 0
     local errors = {}

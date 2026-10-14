@@ -36,7 +36,12 @@ jobs:
             exit 1
           fi
 
+      - name: Build native de-moire filters for every colour target
+        run: python3 scripts/package_native.py --output "${{ github.workspace }}/dist-native" --channel stable
+
       - name: Build release package and update manifest
+        env:
+          KOOC_NATIVE_DIR: ${{ github.workspace }}/dist-native
         run: ./scripts/package_release.sh "${{ steps.version.outputs.value }}" "$GITHUB_REPOSITORY" dist
 
       - name: Create GitHub Release

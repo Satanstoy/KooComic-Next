@@ -1,0 +1,161 @@
+package.path = "./koocomic.koplugin/?.lua;" .. package.path
+local function widget() return {new=function(_, fields) return fields end} end
+for _, name in ipairs({"buttondialog","infomessage","menu","multiinputdialog","confirmbox"}) do
+    package.preload["ui/widget/"..name] = widget
+end
+package.preload["ui/widget/multiinputdialog"]=function() return {new=function(_,fields)
+    fields.onShowKeyboard=function() end
+    fields.getFields=function(self) return {self.fields[1].text} end
+    return fields
+end} end
+package.preload["socket"] = function() return {gettime=os.time} end
+local shown,callbacks=nil,{}
+package.preload["ui/uimanager"] = function() return {show=function(_,widget) shown=widget end,close=function() end,
+    scheduleIn=function(_,delay,callback) callbacks[#callbacks+1]=callback end} end
+local details
+package.preload["koobone.ui.book_detail"] = function() return {show=function(options) details=options end} end
+local current
+package.preload["koobone.ui.bookshelf_grid"] = function()
+    return {show=function(options)
+        current = options
+        return {update=function(_, changed) current=changed end, closed=false}
+    end}
+end
+local Bookshelf = require("koobone.ui.bookshelf")
+local shelf = Bookshelf:new{library={items={}},storage={isDownloaded=function() return false end},downloader={},
+    settings={account=function() return {uin="42"} end, ui=function() return {} end}}
+local books = {
+    {vol_id=1,file_md5="a",vol_name="Original 1",vol_series="Series",vol_author="Author"},
+    {vol_id=2,file_md5="b",vol_name="Original 2",vol_series="Series",vol_author="Author"},
+}
+shelf:show(books)
+assert(current.mode == "series" and #current.books == 1, "production controller still shows a flat shelf")
+assert(type(current.on_menu) == "function" and type(current.on_view) == "function")
+current.on_select(current.books[1])
+assert(#current.books == 2 and current.path_label == "Series")
+assert(current.on_back())
+assert(#current.books == 1 and current.path_label == "")
+current.on_view("volumes")
+assert(#current.books == 2 and current.mode == "volumes")
+assert(books[1].vol_name == "Original 1")
+current.on_view("series")
+local recent = {
+    {vol_id=3,file_md5="c",vol_name="Z",vol_series="Z",vol_author="Author"},
+    {vol_id=4,file_md5="d",vol_name="A",vol_series="A",vol_author="Author"},
+}
+shelf:show(recent)
+assert(current.books[1]._series.title=="Z")
+shelf:showSort()
+shown.buttons[2][1].callback()
+assert(current.books[1]._series.title=="A", "actual title-sort command must update the root series view")
+local ui={series_style="collage"}
+shelf.settings.ui=function() return ui end
+local fetched={}
+shelf.cover_cache={url=function() return "fixture" end,fetch=function() error("HTTP on UI thread") end,
+    fetchAsync=function(_,item,done) fetched[#fetched+1]=item;done("cached");return {cancel=function() return true end} end}
+shelf.grid_view.refreshCovers=function() end
+local members={}
+for index=1,9 do members[index]={file_md5=tostring(index)} end
+shelf:_prefetchCovers({{_series={books=members}}})
+for _=1,20 do if #callbacks==0 then break end;table.remove(callbacks,1)() end
+assert(#fetched==4 and fetched[1]==members[1] and fetched[4]==members[4],"collage must fetch four visible members, not an unbounded series")
+ui.series_style="text";fetched={}
+shelf:_prefetchCovers({{_series={books=members}}})
+assert(#callbacks==0,"text style must not schedule artwork downloads")
+ui.series_style="divider";fetched={}
+local fallback_members={{file_md5="cover-first",vol_name="Volume 1",vol_series="Cover",vol_author="A",vol_index=1,cover_url="first"},
+    {file_md5="cover-second",vol_name="Volume 2",vol_series="Cover",vol_author="A",vol_index=2,cover_url="second"}}
+shelf.cover_cache.url=function(_,item) return item.cover_url end
+shelf.cover_cache.localPath=function(_,item) return item._koobone_cover_path end
+shelf.cover_cache.fetchAsync=function(_,item,done)
+    fetched[#fetched+1]=item.file_md5
+    if item.file_md5=="cover-first" then done(nil) else item._koobone_cover_path="fallback-cover";done("fallback-cover") end
+    return {cancel=function() return true end}
+end
+shelf.navigation:setBooks(fallback_members)
+local fallback_card=shelf.navigation:items(fallback_members)[1]
+shelf:_prefetchCovers({fallback_card})
+for _=1,20 do if #callbacks==0 then break end;table.remove(callbacks,1)() end
+assert(#fetched==2 and fallback_card._koobone_cover_path=="fallback-cover","failed first cover must fetch the next available series member")
+assert(shelf.navigation:items({fallback_members[2],fallback_members[1]})[1].file_md5=="cover-second","refresh must preserve the successful representative after a first-cover failure")
+shelf.cover_failures={};fetched={}
+local refreshed=0;shelf.grid_view.refreshCovers=function() refreshed=refreshed+1 end
+fallback_card=shelf.navigation:items(fallback_members)[1]
+shelf:_prefetchCovers({fallback_card})
+for _=1,20 do if #callbacks==0 then break end;table.remove(callbacks,1)() end
+assert(#fetched==1 and fallback_card._koobone_cover_path=="fallback-cover" and refreshed>0,
+    "falling back to an already cached member must repaint the visible series card")
+fallback_members[1].cover_url="repaired-first-address"
+assert(shelf.navigation:items(fallback_members)[1].file_md5=="cover-first","a changed cover address must not inherit the previous address failure")
+shelf.cover_cache=nil
+shelf:show(books)
+current.on_view("volumes")
+assert(type(current.on_hold)=="function","holding a volume must enter actual multi-selection")
+current.on_hold(books[1])
+assert(current.selection_active and current.selected_count==1 and current.is_selected(books[1]))
+current.on_select(books[2])
+assert(current.selected_count==2)
+current.on_back()
+assert(not current.selection_active,"Back should cancel selection before leaving the view")
+current.on_view("series")
+current.on_hold(current.books[1])
+assert(shown.title=="Series" and not current.selection_active,"holding a series must show actions, not select every volume")
+local deleted=0
+shelf.local_manager={preview=function(_,items) assert(#items==2);return {
+    files=2,bytes=30,skipped=0,entries={{title="A"},{title="B"}}} end,
+    execute=function(_,preview,done,guard)
+        assert(guard());deleted=preview.files
+        done({success=2,failed=0,files_removed=2,bytes=30,errors={}});return true
+    end}
+shown.buttons[2][1].callback()
+assert(shown.ok_callback and deleted==0,"series delete must preview and require explicit confirmation")
+shown.ok_callback()
+assert(deleted==2 and shown.text:find("删除 2 个阅读文件",1,true),"actual series action must execute and show a result")
+local queued
+shelf.downloader.enqueue=function(_,items) queued=items end
+current.on_view("series");current.on_hold(current.books[1])
+local download_action
+for _,row in ipairs(shown.buttons) do for _,button in ipairs(row) do
+    if button.text=="下载系列未下载卷" then download_action=button end
+end end
+assert(download_action,"series actions must expose real batch enqueue")
+download_action.callback();assert(#queued==2)
+current.on_view("volumes");current.on_hold(books[1]);current.on_select(books[2])
+assert(type(current.on_selection_download)=="function")
+current.on_selection_download();assert(#queued==2 and queued[1].file_md5=="a")
+local refresh_done
+shelf.library.refreshAsync=function(_,done) refresh_done=done;return {} end
+shelf:refresh();refresh_done(books)
+assert(current.preserve_anchor==true and current.row_key(books[1])~=current.row_key(books[2]),
+    "production catalog refresh must explicitly preserve a stable account-aware grid anchor")
+current.on_view("series")
+assert(not current.preserve_anchor,"view switching must retain its own navigation memory")
+local versions={{vol_id=90,file_md5="v1",vol_name="Original version"},
+    {vol_id=90,file_md5="v2",vol_name="Revised version"}}
+shelf.library.identityOptions=function() return {volume_id_verified=true} end
+shelf.selection:cancel();shelf:show(versions);current.on_view("volumes");current.on_select(versions[1])
+assert(details.versions and #details.versions==2 and details.on_select_version,
+    "production details must expose only trusted versions")
+local choose=details.on_select_version
+local replacement={vol_id=90,file_md5="v2",vol_name="Fresh revised version"}
+shelf:show({versions[1],replacement});choose(versions[2])
+assert(details.item==replacement,"version selection must resolve current catalog identity, not stale tables")
+local before=details
+shelf:show({versions[1]});choose(versions[2]);assert(details==before)
+assert(shown.text:find("不再可用",1,true),"removed file versions must not open stale actions")
+local search_books={}
+for index=1,40 do search_books[index]={file_md5="search-"..index,vol_name=index==1 and "Unique needle" or "Original "..index,vol_series="Search Series",vol_author="Fixture"} end
+shelf:show(search_books);current.on_view("volumes");shelf.navigation.page=5;shelf:_render()
+shelf:showSearch();shown.fields[1].text="Unique needle";shown.buttons[1][3].callback()
+current.on_page_changed(current.books,1)
+assert(#current.books==1 and current.path_label:find("Unique needle",1,true) and current.path_label:find("1 项",1,true),
+    "production search must show query and projected result count")
+shelf:showSearch();shown.buttons[1][1].callback()
+assert(current.page==5 and #current.books==40,"clearing the actual search dialog must restore the pre-search page")
+current.on_view("series");shelf:showSearch();shown.fields[1].text="Unique needle";shown.buttons[1][3].callback()
+current.on_select(current.books[1])
+assert(shelf.navigation.parent and shelf.navigation.parent.query=="Unique needle","fixture must enter from an actual searched parent")
+shelf:show({{file_md5="foreign",vol_name="Other",vol_series="Other Series",vol_author="Fixture"}})
+assert(shelf.query=="Unique needle" and shelf.navigation.query=="Unique needle" and #current.books==0,
+    "automatic series removal must preserve parent query: controller="..shelf.query..", navigation="..shelf.navigation.query..", items="..#current.books)
+print("shelf controller spec: OK")

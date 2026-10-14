@@ -5,28 +5,52 @@ local MultiInputDialog = require("ui/widget/multiinputdialog")
 local UIManager = require("ui/uimanager")
 local BookDetail = require("koobone.ui.book_detail")
 local Util = require("koobone.util")
+local Navigation = require("koobone.ui.shelf_navigation")
+local Selection = require("koobone.selection")
+local LocalManager = require("koobone.local_manager")
+local ConfirmBox = require("ui/widget/confirmbox")
 
 local grid_available, BookshelfGrid = pcall(require, "koobone.ui.bookshelf_grid")
 
 local Bookshelf = {}
 Bookshelf.__index = Bookshelf
+local function coverKey(shelf,item)
+    local url=shelf.cover_cache and shelf.cover_cache:url(item) or item.cover_url or item.cover or item.cover_small
+    return shelf.navigation:rowKey(item).."\0"..tostring(url or "")
+end
 
 function Bookshelf:new(options)
-    return setmetatable({
+    local shelf = setmetatable({
         library = assert(options.library, "library required"),
         storage = assert(options.storage, "storage required"),
         downloader = assert(options.downloader, "downloader required"),
         settings = assert(options.settings, "settings required"),
         cover_cache = options.cover_cache,
+        preprocess = options.preprocess,
+        on_preprocess = options.on_preprocess,
         on_downloads = options.on_downloads,
         on_account = options.on_account,
         on_settings = options.on_settings,
+        on_book_select=options.on_book_select,
+        decorate_grid=options.decorate_grid,
         query = "",
         sort_mode = "recent",
         filter_mode = "all",
         cover_generation = 0,
+        cover_failures = {},
         grid_view = nil,
     }, self)
+    shelf.navigation = Navigation:new{account_id=options.settings:account().uin, storage=options.storage,
+        identity_options=function(item) return shelf.library.identityOptions and shelf.library:identityOptions(item) or {} end,
+        cover_available=function(item)
+            if shelf.cover_failures[coverKey(shelf,item)] then return false end
+            if shelf.cover_cache then return shelf.cover_cache:localPath(item) or shelf.cover_cache:url(item) end
+            return item._koobone_cover_path or item.cover_url or item.cover or item.cover_small or item.thumb_url or item.thumbnail
+        end}
+    shelf.selection=Selection:new(options.settings:account().uin)
+    shelf.local_manager=options.local_manager or LocalManager:new{storage=options.storage,downloader=options.downloader,
+        coordinator=options.downloader.coordinator}
+    return shelf
 end
 
 local function progress(item)
@@ -101,32 +125,75 @@ end
 function Bookshelf:_prefetchCovers(items)
     if not self.cover_cache or type(items) ~= "table" then return end
     self.cover_generation = self.cover_generation + 1
+    if self.cover_handle then self.cover_handle:cancel();self.cover_handle=nil end
     local generation = self.cover_generation
     local pending = {}
-    for _, item in ipairs(items) do
-        if not item._koobone_cover_path and self.cover_cache:url(item) then
-            pending[#pending + 1] = item
+    local candidates,seen={},{}
+    local style=self.settings:ui().series_style
+    for _,item in ipairs(items) do
+        if not (item._series and style=="text") then
+            local members=item._series and item._series.books or {item}
+            local limit=item._series and style~="collage" and #members or math.min(4,#members)
+            for index=1,limit do
+                local member=members[index]
+                if not seen[member] then candidates[#candidates+1]={item=member,target=item._series and style~="collage" and item or nil};seen[member]=true end
+            end
+        end
+    end
+    for _, candidate in ipairs(candidates) do
+        local item=candidate.item
+        if (item._koobone_cover_path or self.cover_cache:url(item)) and
+                not (candidate.target and self.cover_failures[coverKey(self,item)]) then
+            pending[#pending + 1] = candidate
         end
     end
     local index = 0
+    local completed={}
     local function fetchNext()
         if generation ~= self.cover_generation or not self.grid_view or self.grid_view.closed then return end
-        index = index + 1
-        local item = pending[index]
-        if not item then return end
-        local ok, path = pcall(self.cover_cache.fetch, self.cover_cache, item)
-        if ok and path then
-            item._koobone_cover_path = path
-            self.grid_view:refreshCovers()
+        local candidate=pending[index+1]
+        while candidate and candidate.target and completed[candidate.target] do index=index+1;candidate=pending[index+1] end
+        if not candidate then return end
+        local item=candidate.item
+        local needs_fetch=self.cover_cache.needsFetch and self.cover_cache:needsFetch(item) or not item._koobone_cover_path
+        if item._koobone_cover_path and not needs_fetch then
+            if candidate.target then
+                local changed=candidate.target._koobone_cover_path~=item._koobone_cover_path
+                candidate.target._koobone_cover_path=item._koobone_cover_path;completed[candidate.target]=true
+                if changed then self.grid_view:refreshCovers() end
+            end
+            index=index+1;UIManager:scheduleIn(0.05,fetchNext);return
         end
-        UIManager:scheduleIn(0.05, fetchNext)
+        local called,handle,err=pcall(self.cover_cache.fetchAsync,self.cover_cache,item,function(path)
+            if generation~=self.cover_generation or not self.grid_view or self.grid_view.closed then return end
+            self.cover_handle=nil
+            if path then
+                item._koobone_cover_path=path
+                if candidate.target then candidate.target._koobone_cover_path=path;completed[candidate.target]=true end
+                self.grid_view:refreshCovers()
+            elseif candidate.target then self.cover_failures[coverKey(self,item)]=true end
+            UIManager:scheduleIn(0.05,fetchNext)
+        end)
+        if called and handle then
+            index=index+1;self.cover_handle=handle
+        elseif called and err=="cover worker busy" then UIManager:scheduleIn(0.05,fetchNext)
+        else
+            index=index+1;UIManager:scheduleIn(0.05,fetchNext)
+        end
     end
     if #pending > 0 then UIManager:scheduleIn(0.05, fetchNext) end
 end
 
 function Bookshelf:_gridOptions(books)
     local search_label, sort_label, filter_label = self:_labels()
-    return {
+    local nav = self.navigation
+    nav.query, nav.sort_mode, nav.filter_mode = self.query, self.sort_mode, self.filter_mode
+    books = nav:items(books)
+    local path_label=nav.series and nav.series.title or ""
+    if self.query~="" then
+        path_label=(path_label~="" and path_label.." / " or "").."搜索："..self.query.." · "..#books.." 项"
+    end
+    local grid_options={
         books = books,
         storage = self.storage,
         account = self.settings:account(),
@@ -134,13 +201,44 @@ function Bookshelf:_gridOptions(books)
         search_label = search_label,
         sort_label = sort_label,
         filter_label = filter_label,
+        mode = nav.mode,
+        page = nav.page,
+        row_key=function(item) return nav:rowKey(item) end,
+        selection_active=self.selection.active,
+        selected_count=self.selection:count(),
+        is_selected=function(item) return not item._series and self.selection:contains(item) end,
+        on_hold=function(item)
+            if item._series then self:showSeriesActions(item._series)
+            else self.selection:begin(item);self:_render() end
+        end,
+        on_selection_cancel=function() self.selection:cancel();self:_render() end,
+        on_selection_delete=function() self:confirmDelete(self.selection:resolve(self.library.items)) end,
+        on_selection_download=function() self.downloader:enqueue(self.selection:resolve(self.library.items)) end,
+        on_selection_more=function() self:showSelectionActions() end,
+        path_label = path_label,
+        on_view = function(mode)
+            nav:switch(mode)
+            self.query, self.sort_mode, self.filter_mode = nav.query, nav.sort_mode, nav.filter_mode
+            self:_render()
+        end,
+        on_back = function()
+            if self.selection.active then self.selection:cancel();self:_render();return true end
+            if not nav:back() then return false end
+            self.query, self.sort_mode, self.filter_mode = nav.query, nav.sort_mode, nav.filter_mode
+            self:_render()
+            return true
+        end,
+        on_menu = function() self:showMore() end,
         on_select = function(item)
-            BookDetail.show{
-                item = item,
-                storage = self.storage,
-                downloader = self.downloader,
-                settings = self.settings,
-            }
+            if item._series then
+                nav:enter(item._series)
+                self.query = nav.query
+                self:_render()
+                return
+            end
+            if self.selection.active then self.selection:toggle(item);self:_render();return end
+            if self.on_book_select then self.on_book_select(item);return end
+            self:showBookDetail(item)
         end,
         on_refresh = function() self:refresh() end,
         on_search = function() self:showSearch() end,
@@ -149,8 +247,26 @@ function Bookshelf:_gridOptions(books)
         on_downloads = self.on_downloads,
         on_account = self.on_account,
         on_settings = self.on_settings,
-        on_page_changed = function(items) self:_prefetchCovers(items) end,
+        on_page_changed = function(items, page)
+            nav.page = page
+            self:_prefetchCovers(items)
+        end,
     }
+    return self.decorate_grid and self.decorate_grid(grid_options) or grid_options
+end
+
+function Bookshelf:showBookDetail(item)
+    local account=self.navigation.account_id
+    return BookDetail.show{item=item,storage=self.storage,downloader=self.downloader,settings=self.settings,
+        preprocess=self.preprocess,versions=self.navigation:versions(item),on_select_version=function(version)
+            local wanted=self.navigation:rowKey(version)
+            if tostring(self.settings:account().uin or "local")==account then
+                for _,candidate in ipairs(self.library.items) do
+                    if self.navigation:rowKey(candidate)==wanted then return self:showBookDetail(candidate) end
+                end
+            end
+            UIManager:show(InfoMessage:new{text="这个文件版本不再可用，请刷新书库。"})
+        end}
 end
 
 function Bookshelf:_items(books)
@@ -183,12 +299,7 @@ function Bookshelf:_items(books)
             mandatory = state,
             post_text = Util.friendlySize(item.file_size),
             callback = function()
-                BookDetail.show{
-                    item = item,
-                    storage = self.storage,
-                    downloader = self.downloader,
-                    settings = self.settings,
-                }
+                self:showBookDetail(item)
             end,
         }
     end
@@ -211,13 +322,27 @@ function Bookshelf:_showListFallback(books)
     return self.menu
 end
 
-function Bookshelf:show(books)
+function Bookshelf:show(books,preserve_anchor)
+    local account_id = tostring(self.settings:account().uin or "local")
+    if account_id ~= self.navigation.account_id then
+        preserve_anchor=false
+        self.navigation:setAccount(account_id)
+        self.query, self.sort_mode, self.filter_mode = "", "recent", "all"
+    end
     self.library.items = books or self.library.items or {}
+    self.selection:setAccount(account_id)
+    self.selection:reconcile(self.library.items)
+    local prior_series=self.navigation.series
+    self.navigation:setBooks(self.library.items)
+    if prior_series and not self.navigation.series then
+        self.query,self.sort_mode,self.filter_mode=self.navigation.query,self.navigation.sort_mode,self.navigation.filter_mode
+    end
     self:_prepareCachedCovers(self.library.items)
     local visible = self:_visibleBooks()
     if not grid_available then return self:_showListFallback(visible) end
 
     local options = self:_gridOptions(visible)
+    options.preserve_anchor=preserve_anchor==true
     if self.grid_view and not self.grid_view.closed then
         self.grid_view:update(options)
         self.menu = self.grid_view
@@ -231,6 +356,7 @@ function Bookshelf:show(books)
             self.grid_view = nil
             self.menu = nil
             self.cover_generation = self.cover_generation + 1
+            if self.cover_handle then self.cover_handle:cancel();self.cover_handle=nil end
         end
     end
     local ok, result = pcall(BookshelfGrid.show, options)
@@ -246,6 +372,59 @@ function Bookshelf:show(books)
     self.grid_view = view
     self.menu = view
     return view
+end
+
+function Bookshelf:showSeriesActions(series)
+    local dialog
+    dialog=ButtonDialog:new{title=series.title,buttons={
+        {{text="选择系列中的卷",callback=function()
+            UIManager:close(dialog);self.navigation:enter(series);self.query="";self.selection:begin();self:_render()
+        end}},
+        {{text="删除系列本地文件",callback=function() UIManager:close(dialog);self:confirmDelete(series.books) end}},
+        {{text="下载系列未下载卷",callback=function() UIManager:close(dialog);self.downloader:enqueue(series.books) end}},
+        {{text="关闭",callback=function() UIManager:close(dialog) end}},
+    }}
+    UIManager:show(dialog)
+end
+
+function Bookshelf:showSelectionActions()
+    local dialog
+    dialog=ButtonDialog:new{title="已选 "..self.selection:count().." 卷",buttons={
+        {{text="加入下载队列",callback=function()
+            UIManager:close(dialog);self.downloader:enqueue(self.selection:resolve(self.library.items))
+        end}},
+        {{text="删除所选本地文件",callback=function()
+            UIManager:close(dialog);self:confirmDelete(self.selection:resolve(self.library.items))
+        end}},
+        {{text="取消选择",callback=function() UIManager:close(dialog);self.selection:cancel();self:_render() end}},
+        {{text="关闭",callback=function() UIManager:close(dialog) end}},
+    }}
+    UIManager:show(dialog)
+end
+
+function Bookshelf:confirmDelete(items)
+    local preview=self.local_manager:preview(items)
+    if preview.files==0 then UIManager:show(InfoMessage:new{text="没有可安全删除的已索引本地 EPUB。"});return end
+    local account=tostring(self.settings:account().uin or "")
+    local names={};for index=1,math.min(3,#preview.entries) do names[#names+1]=preview.entries[index].title end
+    UIManager:show(ConfirmBox:new{
+        text=string.format("删除 %d 个本地 EPUB，阅读文件共 %s？\n%s\n\n同时清理关联内部原版备份，之后不能恢复原版。\n保留 .part、阅读 sidecar 和云端漫画。\n跳过 %d 项。",
+            preview.files,Util.friendlySize(preview.bytes),table.concat(names,"\n"),preview.skipped),
+        ok_text="删除本地文件",cancel_text="取消",ok_callback=function()
+            local ok,err=self.local_manager:execute(preview,function(result)
+                if tostring(self.settings:account().uin or "")~=account then return end
+                self.selection:cancel()
+                if self.grid_view and not self.grid_view.closed then self:_render() end
+                local errors={}
+                for index=1,math.min(5,#result.errors) do
+                    local failure=result.errors[index];errors[#errors+1]=(failure.title or failure.key).."："..failure.error
+                end
+                UIManager:show(InfoMessage:new{text=string.format("完成 %d 项，失败 %d 项；删除 %d 个阅读文件，释放%s %s。\n%s",
+                    result.success,result.failed,result.files_removed,result.lower_bound and "至少" or "",Util.friendlySize(result.bytes),table.concat(errors,"\n"))})
+            end,function() return tostring(self.settings:account().uin or "")==account end)
+            if not ok then UIManager:show(InfoMessage:new{text=tostring(err)}) end
+        end,
+    })
 end
 
 function Bookshelf:_render()
@@ -265,6 +444,7 @@ function Bookshelf:showSearch()
                     text = "清除",
                     callback = function()
                         self.query = ""
+                        self.navigation:setQuery("")
                         UIManager:close(dialog)
                         self:_render()
                     end,
@@ -278,6 +458,7 @@ function Bookshelf:showSearch()
                     is_enter_default = true,
                     callback = function()
                         self.query = Util.trim(dialog:getFields()[1])
+                        self.navigation:setQuery(self.query)
                         UIManager:close(dialog)
                         self:_render()
                     end,
@@ -334,6 +515,17 @@ function Bookshelf:showMore()
     dialog = ButtonDialog:new{
         title = "koo漫画",
         buttons = {
+            {{text="选择卷",callback=function()
+                UIManager:close(dialog)
+                if self.navigation.mode=="series" and not self.navigation.series then self.navigation:switch("volumes") end
+                self.selection:begin();self:_render()
+            end}},
+            {{text="排序",callback=function() UIManager:close(dialog); self:showSort() end},
+             {text="筛选",callback=function() UIManager:close(dialog); self:showFilter() end}},
+            {{text="图像优化 / 去彩纹管理",callback=function()
+                UIManager:close(dialog)
+                if self.on_preprocess then self.on_preprocess() end
+            end}},
             {
                 {
                     text = "刷新书架",
@@ -373,6 +565,22 @@ end
 
 function Bookshelf:refresh()
     UIManager:show(InfoMessage:new{ text = "正在刷新书架……", timeout = 1 })
+    local previous_view=self.grid_view
+    local function display(books,err)
+        if previous_view and previous_view.closed then return end
+        if not books then
+            UIManager:show(InfoMessage:new{text="无法加载完整书库，已保留缓存：\n"..tostring(err)})
+            return
+        end
+        local rendered,render_err=pcall(self.show,self,books,true)
+        if not rendered then UIManager:show(InfoMessage:new{
+            text="生成书架界面时发生错误：\n"..Util.cleanMessage(render_err)}) end
+    end
+    if self.library.refreshAsync then
+        local called,started,err=pcall(self.library.refreshAsync,self.library,display)
+        if not called then display(nil,"无法启动书库同步") elseif not started then display(nil,err) end
+        return
+    end
     UIManager:scheduleIn(0.15, function()
         local request_ok, books, err = pcall(function()
             return self.library:refresh()
@@ -387,7 +595,7 @@ function Bookshelf:refresh()
             UIManager:show(InfoMessage:new{ text = "无法加载书架：\n" .. tostring(err) })
             return
         end
-        local render_ok, render_err = pcall(function() self:show(books) end)
+        local render_ok, render_err = pcall(function() self:show(books,true) end)
         if not render_ok then
             UIManager:show(InfoMessage:new{
                 text = "生成书架界面时发生错误：\n" .. Util.cleanMessage(render_err),

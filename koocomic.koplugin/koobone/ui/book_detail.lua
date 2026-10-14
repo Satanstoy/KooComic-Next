@@ -3,6 +3,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
 local InfoPanel = require("koobone.ui.info_panel")
 local Util = require("koobone.util")
+local Menu = require("ui/widget/menu")
 
 local BookDetail = {}
 
@@ -17,10 +18,14 @@ function BookDetail.show(options)
     local progress = tostring(item.last_readpage or 0) .. " / " .. tostring(item.count_page or "?")
     local local_state = downloaded and "已下载" or
         (partial > 0 and ("有临时文件 " .. Util.friendlySize(partial)) or "未下载")
+    local size=tonumber(item.file_size)
+    local size_label=size and size>0 and size<math.huge and Util.friendlySize(size) or "未知"
     local description = table.concat({
-        "文件：" .. Util.friendlySize(item.file_size),
+        "版本："..tostring(item.file_type or "epub").." · "..tostring(item.file_md5 or "未知身份"):sub(1,12),
+        "文件：" .. size_label,
         "KOOBONE 进度：" .. progress,
         "本地状态：" .. local_state,
+        downloaded and ("本地文件："..tostring(storage:resolveLocalPath(item) or "已丢失")) or "",
     }, "\n")
 
     local dialog
@@ -36,7 +41,12 @@ function BookDetail.show(options)
                 callback = function()
                     dialog:close()
                     if downloaded then
-                        downloader:open(storage:itemPath(item))
+                        local path = storage:resolveLocalPath(item)
+                        if path then
+                            downloader:open(path)
+                        else
+                            UIManager:show(InfoMessage:new{ text = "本地文件已丢失或路径不可用，请刷新书库。" })
+                        end
                     else
                         downloader:download(item)
                     end
@@ -51,7 +61,43 @@ function BookDetail.show(options)
             downloader:notifyChanged()
         end
     end
+    if options.versions and #options.versions>1 and options.on_select_version then
+        buttons[#buttons+1]={{text="文件版本 ("..#options.versions..")",callback=function()
+            dialog:close()
+            local menu,rows
+            rows={}
+            for _,version in ipairs(options.versions) do
+                local value=version
+                rows[#rows+1]={text=value.vol_name or "未命名漫画",
+                    mandatory=tostring(value.file_type or "epub").." / "..tostring(value.file_md5 or "?"):sub(1,12)..
+                        (storage:isDownloaded(value) and " / 已下载" or ""),
+                    callback=function() UIManager:close(menu);options.on_select_version(value) end}
+            end
+            menu=Menu:new{title="文件版本",item_table=rows,is_borderless=true,title_bar_fm_style=true}
+            UIManager:show(menu)
+        end}}
+    end
     if downloaded then
+        if options.preprocess then
+            local service=options.preprocess
+            local path=storage:resolveLocalPath(item)
+            local function perform()
+                if not service.available then UIManager:show(InfoMessage:new{text=tostring(service.reason)});return end
+                UIManager:show(ConfirmBox:new{
+                    text="处理这本漫画的彩纹？成功后直接覆盖原 EPUB，不保留原版备份，不能撤销。".."\n\n"..title,
+                    ok_text="开始处理",
+                    ok_callback=function()
+                        local ok,err
+                        ok,err=service:submit(item)
+                        if ok then ok,err=service:resume() end
+                        if not ok then UIManager:show(InfoMessage:new{text=tostring(err or "处理不可用")})
+                        else dialog:close();changed() end
+                    end,
+                })
+            end
+            buttons[#buttons+1]={{text="去彩纹处理",enabled=service.available and not service:isLocked(path),
+                callback=perform}}
+        end
         buttons[#buttons + 1] = {
             {
                 text = "删除本地漫画",
@@ -60,7 +106,11 @@ function BookDetail.show(options)
                         UIManager:show(InfoMessage:new{ text = "请等待当前下载任务结束后再删除。" })
                         return
                     end
-                    local path = storage:itemPath(item)
+                    local path = storage:resolveLocalPath(item)
+                    if not path then
+                        UIManager:show(InfoMessage:new{ text = "本地文件已丢失或路径不可用，请刷新书库。" })
+                        return
+                    end
                     local size = storage:fileSize(path)
                     UIManager:show(ConfirmBox:new{
                         text = table.concat({
@@ -69,6 +119,7 @@ function BookDetail.show(options)
                             title,
                             Util.friendlySize(size),
                             path,
+                            options.preprocess and "同时清理这本漫画的内部原版备份（如有）。" or "",
                             "",
                             "不会删除 KOOBONE 云端书库中的漫画或阅读记录。",
                         }, "\n"),

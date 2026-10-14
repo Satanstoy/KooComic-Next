@@ -46,7 +46,16 @@ if [[ ! -f "$RELEASE_NOTES_FILE" ]]; then
 fi
 
 mkdir -p "$RELEASE_DIR" "$PAGES_DIR" "$TEMP_DIR/koocomic.koplugin"
-cp -R "$PLUGIN_DIR/." "$TEMP_DIR/koocomic.koplugin/"
+python3 "$SCRIPT_DIR/package_source.py" "$PROJECT_DIR" "$TEMP_DIR/koocomic.koplugin"
+# A single package carries the native filter for every colour platform when a
+# prebuilt native directory is provided (build it with scripts/package_native.py).
+if [[ -n "${KOOC_NATIVE_DIR:-}" ]]; then
+    if [[ ! -f "$KOOC_NATIVE_DIR/build.json" ]]; then
+        echo "KOOC_NATIVE_DIR has no build.json: $KOOC_NATIVE_DIR" >&2
+        exit 1
+    fi
+    python3 "$SCRIPT_DIR/package_native_merge.py" "$KOOC_NATIVE_DIR" "$TEMP_DIR/koocomic.koplugin"
+fi
 find "$TEMP_DIR/koocomic.koplugin" -name '.DS_Store' -delete
 find "$TEMP_DIR/koocomic.koplugin" -type f \( -name '*.log' -o -name '*.part' -o -name '*.tmp' \) -delete
 rm -f "$RELEASE_DIR/$ARCHIVE_NAME" "$RELEASE_DIR/$ARCHIVE_NAME.sha256"
@@ -83,6 +92,7 @@ if not isinstance(notes, list) or not notes or not all(isinstance(note, str) and
     raise SystemExit("Release notes must contain at least one non-empty note")
 
 manifest = {
+    "product_id": "koocomic-next",
     "version": version,
     "channel": "stable",
     "package_type": "full",

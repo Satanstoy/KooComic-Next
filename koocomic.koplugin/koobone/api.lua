@@ -261,7 +261,8 @@ end
 
 function Api:download(url, part_path, options)
     options = options or {}
-    local handle, open_err = io.open(part_path, "wb")
+    local handle, open_err = options.handle
+    if not handle then handle,open_err=io.open(part_path, "wb") end
     if not handle then return nil, open_err or "无法创建临时文件" end
     local received = 0
     local total_hint = tonumber(options.total) or 0
@@ -280,6 +281,7 @@ function Api:download(url, part_path, options)
             local ok, write_err = handle:write(chunk)
             if not ok then return nil, write_err end
             received = received + #chunk
+            if options.update_hash then options.update_hash(chunk) end
             if options.on_progress then options.on_progress(received, total_hint) end
         end
         return 1
@@ -299,13 +301,14 @@ function Api:download(url, part_path, options)
         block_timeout = socketutil.FILE_BLOCK_TIMEOUT,
         total_timeout = -1,
     }
-    handle:close()
+    local closed,close_error=handle:close()
+    if not closed then return nil,close_error or "无法关闭临时文件",received end
     if cancelled then return nil, "cancelled", received end
     if sink_error then return nil, sink_error, received end
     if not response then return nil, err, received end
     if response.code ~= 200 then return nil, "HTTP " .. tostring(response.code), received end
     if received <= 0 then return nil, "下载内容为空", received end
-    return true, response.headers, received
+    return true, response.headers, received,options.update_hash and options.update_hash()
 end
 
 return Api

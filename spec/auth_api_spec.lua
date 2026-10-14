@@ -195,5 +195,17 @@ local response, request_err = api:request{
 assert(response == nil)
 assert(request_err == "timeout")
 assert(requests[10].url == "https://download.example.test/book.epub")
+local received_data,closed="",false
+responses[#responses+1]={code=200,body="bytes!"}
+local downloaded=api:download("https://download.example.test/book.epub","/not-a-real-directory/test.part",{
+    handle={write=function(_,chunk) received_data=received_data..chunk;return true end,
+        close=function() closed=true;return true end}})
+assert(downloaded and closed and received_data=="bytes!","download must consume a supplied exclusive handle without reopening its path")
+local hashed=""
+responses[#responses+1]={code=200,body="wire bytes"}
+local ok_hash,_,_,digest=api:download("https://download.example.test/book.epub","unused",{
+    handle={write=function() return true end,close=function() return true end},
+    update_hash=function(chunk) if chunk then hashed=hashed..chunk else return "stream digest" end end})
+assert(ok_hash and hashed=="wire bytes" and digest=="stream digest","trusted stream fingerprint must be computed before filesystem rereads")
 
 print("auth API spec: OK")

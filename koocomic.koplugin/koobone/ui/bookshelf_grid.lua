@@ -19,6 +19,13 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local Metrics = require("koobone.ui.metrics")
+local Layout = require("koobone.ui.shelf_layout")
+local Space = require("koobone.ui.vendor.bookshelf.space")
+local FolderCard = require("koobone.ui.vendor.bookshelf.folder_card")
+local CountBadge = require("koobone.ui.vendor.bookshelf.count_badge")
+local CoverCard = require("koobone.ui.vendor.bookshelf.cover_card")
+local Icons = require("koobone.ui.bookshelf_icons")
+local StackDisplay = require("koobone.ui.vendor.bookshelf.stack_display")
 
 local Screen = Device.screen
 local WHITE = Blitbuffer.COLOR_WHITE
@@ -130,6 +137,7 @@ local function textBox(text, width, height, size, options)
         height_overflow_show_ellipsis = true,
         alignment = options.alignment or "center",
         fgcolor = options.fgcolor or BLACK,
+        bgcolor = options.bgcolor or WHITE,
     }
 end
 
@@ -240,11 +248,7 @@ local function coverImage(path, width, height)
         if image and image.free then pcall(image.free, image) end
         return nil
     end
-    return fixedFrame(width, height, {
-        bordersize = dp(1),
-        background = WHITE,
-        color = DARK_GRAY,
-    }, image)
+    return CenterContainer:new{dimen=Geom:new{w=width,h=height},image}
 end
 
 local function itemTitle(item)
@@ -279,38 +283,103 @@ local function badge(text, width, height)
         })
 end
 
-local function bookCard(item, width, height, storage, callback)
-    local title_h = dp(25)
-    local author_h = dp(19)
+local function bookCard(item, width, height, storage, callback, ui, controls)
+    controls=controls or {}
+    local title_h = dp(40)
     local gap = dp(2)
-    local cover_h = math.max(dp(110), height - title_h - author_h - gap * 2)
-    local cover_w = math.min(math.floor(width * 0.94), math.floor(cover_h * 0.70))
+    local shadow = Space.px(4)
+    local style=item._series and StackDisplay.resolve(ui and ui.series_style) or "none"
+    local pile=StackDisplay.pileInset(style,item._series and item._series.volume_count)
+    local ribbon=StackDisplay.ribbonInset(style)
+    local cover_w = width - shadow-pile-ribbon
+    local slot_h = math.min(math.floor((width-shadow) / 0.70)+shadow, height-title_h-gap)
+    local cover_h = slot_h-shadow-pile
+    local border = Screen:scaleBySize(1)
+    local inner_w,inner_h = cover_w-2*border,cover_h-2*border
     local title = itemTitle(item)
-    local cover = coverImage(item._koobone_cover_path, cover_w, cover_h)
+    local cover
+    if style=="text" then
+        cover=fixedFrame(inner_w,inner_h,{background=WHITE,bordersize=0},
+            textBox(title,inner_w-dp(12),math.min(dp(64),inner_h-dp(60)),16,{bold=true}))
+    elseif style=="collage" then
+        cover=OverlapGroup:new{dimen=Geom:new{w=inner_w,h=inner_h}}
+        local members=item._series.books or {item}
+        local order=StackDisplay.collagePlacement(math.min(4,#members))
+        local half_w,half_h=math.ceil(inner_w/2),math.ceil(inner_h/2)
+        local quarters={{0,0,half_w,half_h},{half_w,0,inner_w-half_w,half_h},
+            {0,half_h,half_w,inner_h-half_h},{half_w,half_h,inner_w-half_w,inner_h-half_h}}
+        cover[#cover+1]=fixedFrame(inner_w,inner_h,{background=LIGHT_GRAY,bordersize=0},Widget:new{dimen=Geom:new{w=0,h=0}})
+        for index,q in ipairs(order) do
+            local rect,member=quarters[q],members[index]
+            if member then
+                local cell=coverImage(member._koobone_cover_path,rect[3],rect[4]) or
+                    PlaceholderCover:new{width=rect[3],height=rect[4],title=itemTitle(member),volume=""}
+                cover[#cover+1]=OffsetContainer:new{x_off=rect[1],y_off=rect[2],cell}
+            end
+        end
+    else cover = coverImage(item._koobone_cover_path, inner_w, inner_h)
         or PlaceholderCover:new{
-            width = cover_w,
-            height = cover_h,
+            width = inner_w,
+            height = inner_h,
             title = title,
             volume = itemVolume(item),
         }
+    end
+    local art=OverlapGroup:new{dimen=Geom:new{w=cover_w+shadow,h=cover_h+shadow},allow_mirroring=false}
+    art[#art+1]=FrameContainer:new{bordersize=0,padding=0,padding_top=shadow,padding_left=shadow,
+        CoverCard.ShadowRect:new{width=cover_w,height=cover_h,radius=shadow,color=Blitbuffer.COLOR_GRAY}}
+    art[#art+1]=CoverCard.RoundedCornerCard:new{width=cover_w,height=cover_h,radius=Space.px(4),
+        border_size=border,border_color=BLACK,inner=cover,shadow_color=Blitbuffer.COLOR_GRAY,
+        shadow_offset_x=shadow,shadow_offset_y=shadow,shadow_radius=shadow}
     local cover_layers = OverlapGroup:new{
-        dimen = Geom:new{ w = cover_w, h = cover_h },
+        dimen = Geom:new{ w = width, h = slot_h },
         allow_mirroring = false,
-        cover,
     }
+    -- Each offset outline is a distinct book edge, following the upstream pile count and direction.
+    for depth=StackDisplay.pileLayers(item._series and item._series.volume_count),1,-1 do
+        if style=="stack" then
+            local offset=depth*StackDisplay.pileStep()
+            cover_layers[#cover_layers+1]=OffsetContainer:new{x_off=offset,y_off=offset,
+                FrameContainer:new{width=cover_w,height=cover_h,bordersize=border,padding=0,
+                    radius=Space.px(4),background=WHITE,color=Blitbuffer.COLOR_GRAY,Widget:new{dimen=Geom:new{w=0,h=0}}}}
+        end
+    end
+    cover_layers[#cover_layers+1]=OffsetContainer:new{x_off=math.floor(ribbon/2),y_off=0,art}
     local downloaded = storage:isDownloaded(item)
     local partial = storage:partSize(item)
-    local progress = progressPercent(item)
     local badge_text
-    if downloaded then
+    if not item._series and controls.status_for then
+        badge_text=controls.status_for(item)
+    elseif not item._series and downloaded then
         badge_text = "已下载"
-    elseif partial > 0 then
+    elseif not item._series and partial > 0 then
         badge_text = "未完成"
-    elseif progress > 0 then
-        badge_text = tostring(progress) .. "%"
+    end
+    if item._series then
+        local theme={folder_bg=Blitbuffer.gray(0.20),folder_fg=BLACK,border=BLACK,badge_bg=WHITE,badge_fg=BLACK}
+        if Screen.isColorEnabled and Screen:isColorEnabled() then
+            theme.folder_bg=Blitbuffer.colorFromString("#e7c9a9")
+        end
+        if style=="divider" then
+            local folder,label=FolderCard.build{width=width,height=slot_h,label=title,
+                shadow_reserve=shadow,theme=theme,face=face("infofont",16)}
+            cover_layers[#cover_layers+1]=folder
+            cover_layers[#cover_layers+1]=label
+        elseif style=="ribbon" then
+            theme.ribbon_bg,theme.ribbon_fg=BLACK,WHITE
+            local band,band_y=StackDisplay.ribbonWidget(cover_w,cover_h,title,{theme=theme,face=face("infofont",15)})
+            if band then cover_layers[#cover_layers+1]=OffsetContainer:new{x_off=0,y_off=band_y,band} end
+        end
+        local count=CountBadge.render(item._series.volume_count,{theme=theme,face=face("smallinfofont",12)})
+        if count then cover_layers[#cover_layers+1]=OffsetContainer:new{
+            x_off=math.max(0,math.floor(ribbon/2)+cover_w-count:getSize().w),y_off=0,count} end
+        if item._series.downloaded_count > 0 then
+            cover_layers[#cover_layers+1] = OffsetContainer:new{x_off=dp(4),y_off=dp(4),
+                badge((controls.series_count_prefix or "↓")..tostring(item._series.downloaded_count),dp(38),dp(24))}
+        end
     end
     if badge_text then
-        local badge_w = math.max(dp(42), #badge_text * dp(11))
+        local badge_w = math.min(cover_w-dp(8), dp(item._series and 46 or 60))
         local badge_h = dp(24)
         cover_layers[#cover_layers + 1] = OffsetContainer:new{
             x_off = math.max(0, cover_w - badge_w - dp(4)),
@@ -318,15 +387,24 @@ local function bookCard(item, width, height, storage, callback)
             badge(badge_text, badge_w, badge_h),
         }
     end
+    if controls.selected then
+        cover_layers[#cover_layers+1]=OffsetContainer:new{x_off=math.floor(ribbon/2),y_off=0,
+            CoverCard.RoundedCornerCard:new{width=cover_w,height=cover_h,radius=Space.px(4),
+                border_size=Space.px(3),border_color=BLACK}}
+        local check_size=dp(28)
+        cover_layers[#cover_layers+1]=OffsetContainer:new{x_off=math.max(0,cover_w-check_size),y_off=cover_h-check_size,
+            fixedFrame(check_size,check_size,{bordersize=dp(1),background=WHITE,color=BLACK},Icons.build("check",18))}
+    end
 
     local body = VerticalGroup:new{
         align = "center",
         cover_layers,
         VerticalSpan:new{ height = gap },
-        textBox(title, width, title_h, 14, { bold = true }),
-        textBox(itemAuthor(item), width, author_h, 11, { fgcolor = DARK_GRAY }),
     }
-    return tappable(width, height, body, callback, { hold_callback = callback })
+    if not item._series or StackDisplay.needsExternalLabel(style) then
+        body[#body+1] = textBox(title,width,title_h,14,{bold=true})
+    end
+    return tappable(width, height, body, callback, { hold_callback = controls.on_hold or callback })
 end
 
 local GridShelf = InputContainer:extend{
@@ -373,6 +451,71 @@ function GridShelf:_close()
     self.closed = true
     UIManager:close(self)
     return true
+end
+
+function GridShelf:_buildChrome(layers, layout)
+    local width, header_h, footer_h = layout.header.w, layout.header.h, layout.footer.h
+    local action_w = math.min(header_h, math.floor(width/8))
+    local tab_w = math.floor((width-action_w*2)/3)
+    local header = HorizontalGroup:new{}
+    self.chrome = {tabs={},footer={}}
+    local function iconButton(kind,w,h,callback,disabled)
+        if disabled then callback=nil end
+        local button=tappable(w,h,Icons.build(kind,20,disabled),callback,{hold_callback=function()
+            UIManager:show(require("ui/widget/infomessage"):new{text=Icons.name(kind)})
+        end})
+        button.description=Icons.name(kind)
+        return button
+    end
+    header[#header+1] = iconButton("back",action_w,header_h,function() self:onBack() end)
+    for _, tab in ipairs(self.options.tabs or {{id="series",label="系列"},{id="volumes",label="单卷"},{id="downloaded",label="已下载"}}) do
+        local selected = (self.options.mode or "series") == tab.id
+        local callback = function() if self.options.on_view then self.options.on_view(tab.id) end end
+        local button = tappable(tab_w,header_h,
+            singleLine(tab.label,tab_w-dp(4),header_h,14,{bold=true,fgcolor=selected and WHITE or BLACK}),
+            callback,{background=selected and BLACK or WHITE,bordersize=dp(1)})
+        self.chrome.tabs[#self.chrome.tabs+1] = {label=tab.label,id=tab.id,button=button}
+        header[#header+1] = button
+    end
+    header[#header+1] = iconButton("search",width-action_w-tab_w*3,header_h,self.options.on_search)
+    self:_add(layers,0,0,header)
+    if layout.path.h > 0 then
+        self:_add(layers,layout.path.x,layout.path.y,textBox(self.options.path_label,layout.path.w,layout.path.h,12,{}))
+    end
+    local side = math.max(dp(40),footer_h)
+    if self.options.selection_active then
+        self.chrome.selection=true
+        local has_delete=self.options.selection_delete_enabled~=false
+        local footer=HorizontalGroup:new{
+            iconButton("menu",side,footer_h,self.options.on_selection_more),
+            iconButton("previous",side,footer_h,self.page>1 and function() self:_changePage(self.page-1) end or nil,self.page<=1),
+            singleLine("已选 "..tostring(self.options.selected_count or 0),width-side*(has_delete and 6 or 5),footer_h,14,{}),
+            iconButton("next",side,footer_h,self.page<self.pages and function() self:_changePage(self.page+1) end or nil,self.page>=self.pages),
+            iconButton(self.options.selection_action_icon or "enqueue",side,footer_h,self.options.on_selection_download,(self.options.selected_count or 0)==0),
+        }
+        if has_delete then footer[#footer+1]=iconButton("delete",side,footer_h,self.options.on_selection_delete,(self.options.selected_count or 0)==0) end
+        footer[#footer+1]=iconButton("cancel",side,footer_h,self.options.on_selection_cancel)
+        self:_add(layers,0,layout.footer.y,footer)
+        return
+    end
+    local narrow = width < side*7
+    local arrows = narrow and 2 or 4
+    local middle = width-side*(2+arrows)
+    local footer = HorizontalGroup:new{}
+    footer[#footer+1] = iconButton("menu",side,footer_h,self.options.on_menu)
+    local function arrow(icon,target,enabled)
+        local button = iconButton(icon,side,footer_h,
+            enabled and function() self:_changePage(target) end or nil,not enabled)
+        self.chrome.footer[#self.chrome.footer+1] = button
+        footer[#footer+1] = button
+    end
+    if not narrow then arrow("first",1,self.page>1) end
+    arrow("previous",self.page-1,self.page>1)
+    footer[#footer+1] = singleLine(tostring(self.page).." / "..tostring(self.pages),middle,footer_h,12,{})
+    arrow("next",self.page+1,self.page<self.pages)
+    if not narrow then arrow("last",self.pages,self.page<self.pages) end
+    footer[#footer+1] = iconButton(self.options.queue_icon or "downloads",side,footer_h,self.options.on_downloads)
+    self:_add(layers,0,layout.footer.y,footer)
 end
 
 function GridShelf:_buildHeader(layers, margin, width, y, height)
@@ -481,43 +624,48 @@ function GridShelf:_build()
         ShelfSwipe = { GestureRange:new{ ges = "swipe", range = self.dimen } },
     }
     active_text_size = tostring((self.options.ui or {}).text_size or "large")
-    local columns, rows = Metrics.grid(self.options.ui)
+    local metric = Metrics.screen()
+    local ui = self.options.ui or {}
+    local columns = metric.portrait and ui.portrait_columns or ui.landscape_columns
+    local rows = metric.portrait and ui.portrait_rows or ui.landscape_rows
+    self.layout = Layout.compute{width=sw,height=sh,scale=dp(100)/100,
+        columns=columns,rows=rows,path=self.options.path_label ~= nil and self.options.path_label ~= ""}
+    columns, rows = self.layout.columns, self.layout.rows
     self.perpage = columns * rows
     self.pages = math.max(1, math.ceil(#self.options.books / self.perpage))
+    if self.refresh_anchor and self.options.row_key then
+        for index,item in ipairs(self.options.books) do
+            if self.options.row_key(item)==self.refresh_anchor then
+                self.page=math.floor((index-1)/self.perpage)+1;break
+            end
+        end
+    end
+    self.refresh_anchor=nil
     self.page = math.max(1, math.min(self.pages, self.page))
 
-    local margin = dp(10)
-    local header_h = dp(72)
-    local toolbar_h = dp(52)
-    local pager_h = dp(46)
-    local nav_h = dp(72)
-    local grid_gap_y = dp(5)
-    local grid_gap_x = dp(10)
-    local content_w = sw - margin * 2
-    local grid_y = margin + header_h + toolbar_h + dp(10)
-    local pager_y = sh - nav_h - pager_h
-    local grid_h = math.max(1, pager_y - grid_y - dp(8))
-    local card_w = math.floor((content_w - grid_gap_x * (columns - 1)) / columns)
-    local card_h = math.floor((grid_h - grid_gap_y * (rows - 1)) / rows)
+    local margin = self.layout.margin
+    local content_w = sw-margin*2
+    local grid_y = self.layout.header.h+self.layout.path.h
+    local grid_h = self.layout.footer.y-grid_y
 
     local layers = OverlapGroup:new{ dimen = self.dimen:copy(), allow_mirroring = false }
     self:_add(layers, 0, 0, fixedFrame(sw, sh, { background = WHITE }))
-    self:_buildHeader(layers, margin, content_w, margin, header_h)
-    self:_buildToolbar(layers, margin, content_w, margin + header_h, toolbar_h)
+    self:_buildChrome(layers,self.layout)
 
     local first = (self.page - 1) * self.perpage + 1
     local last = math.min(#self.options.books, first + self.perpage - 1)
     local slot = 0
     for index = first, last do
-        local row = math.floor(slot / columns)
-        local column = slot % columns
+        local rect = self.layout.slots[slot+1]
         local item = self.options.books[index]
         self:_add(layers,
-            margin + column * (card_w + grid_gap_x),
-            grid_y + row * (card_h + grid_gap_y),
-            bookCard(item, card_w, card_h, self.options.storage, function()
+            rect.x,rect.y,
+            bookCard(item,rect.w,rect.h,self.options.storage,function()
                 if self.options.on_select then self.options.on_select(item) end
-            end))
+            end,self.options.ui,{selected=self.options.is_selected and self.options.is_selected(item),
+                status_for=self.options.status_for,series_count_prefix=self.options.series_count_prefix,
+                on_hold=function() if self.options.on_hold then self.options.on_hold(item)
+                    elseif self.options.on_select then self.options.on_select(item) end end}))
         slot = slot + 1
     end
     if #self.options.books == 0 then
@@ -528,8 +676,6 @@ function GridShelf:_build()
             })
     end
 
-    self:_buildPager(layers, margin, content_w, pager_y, pager_h)
-    self:_buildBottomNav(layers, sw, sh - nav_h, nav_h)
     self[1] = layers
 end
 
@@ -548,11 +694,18 @@ end
 
 function GridShelf:update(options, notify)
     if self.closed then return false end
+    if options and options.preserve_anchor then self:_captureAnchor() end
     for key, value in pairs(options or {}) do self.options[key] = value end
+    if options and options.page then self.page = options.page end
     self:_build()
     UIManager:setDirty(self, "full")
     if notify ~= false then self:_notifyPage() end
     return true
+end
+
+function GridShelf:_captureAnchor()
+    local item=self:visibleItems()[1]
+    self.refresh_anchor=item and self.options.row_key and self.options.row_key(item) or nil
 end
 
 function GridShelf:refreshCovers()
@@ -563,6 +716,12 @@ function GridShelf:refreshCovers()
 end
 
 function GridShelf:onShelfSwipe(_, gesture)
+    if self.closed then return false end
+    local origin=gesture and (gesture.start_pos or gesture.pos)
+    local edge=math.min(dp(32),math.floor(Screen:getWidth()/12))
+    if gesture and gesture.direction=="east" and type(origin)=="table" and type(origin.x)=="number" and origin.x>=0 and origin.x<edge then
+        return self:onBack()
+    end
     if gesture and gesture.direction == "west" then return self:_changePage(self.page + 1) end
     if gesture and gesture.direction == "east" then return self:_changePage(self.page - 1) end
     return false
@@ -577,11 +736,13 @@ function GridShelf:onPreviousPage()
 end
 
 function GridShelf:onBack()
+    if self.options.on_back and self.options.on_back() then return true end
     return self:_close()
 end
 
 function GridShelf:onScreenResize()
     if self.closed then return true end
+    self:_captureAnchor()
     self:_build()
     UIManager:setDirty(self, "full")
     self:_notifyPage()
@@ -602,7 +763,11 @@ function GridShelf:onShow()
 end
 
 function GridShelf:onCloseWidget()
+    if self.close_notified then return end
+    self.close_notified=true
     self.closed = true
+    if self[1] and self[1].free then self[1]:free() end
+    self[1]=nil
     if self.options.on_close then self.options.on_close() end
 end
 

@@ -4,6 +4,7 @@ local ReaderUI = require("apps/reader/readerui")
 local UIManager = require("ui/uimanager")
 local DownloadDialog = require("koobone.ui.download_dialog")
 local Util = require("koobone.util")
+local Guard = require("koobone.runtime_guard")
 
 local Downloader = {}
 Downloader.__index = Downloader
@@ -17,18 +18,63 @@ function Downloader:new(options)
         active = false,
         cancelled = false,
         on_changed = options.on_changed,
+        preprocess = options.preprocess,
+        coordinator = options.coordinator,
+        service = options.service,
+        run_when_online = options.run_when_online or function(callback) callback() end,
     }, self)
 end
 
 function Downloader:isActive()
+    if self.service then return self.service:isActive() end
     return self.active == true
 end
 
+function Downloader:enqueue(items)
+    if not Guard.ensure() then UIManager:show(InfoMessage:new{text=Guard.reason});return nil,Guard.reason end
+    if not self.service then return nil,"当前下载器不支持批量队列" end
+    local preview,err=self.service:preview(items)
+    if not preview then UIManager:show(InfoMessage:new{text=tostring(err)});return nil,err end
+    if preview.files==0 then
+        UIManager:show(InfoMessage:new{text=string.format("没有可入队的卷。已下载 %d，已排队 %d，无效 %d。",
+            preview.downloaded,preview.duplicate,preview.invalid)})
+        return false
+    end
+    UIManager:show(ConfirmBox:new{
+        text=string.format("将 %d 卷加入下载队列？\n已知文件共 %s，已知卷额外暂存估计 %s。\n未知大小 %d 卷，可用空间 %s。\n未知卷临时空间尚未知，按运行时剩余空间限额。\n跳过：已下载 %d，已排队 %d，无效 %d。",
+            preview.files,Util.friendlySize(preview.bytes),Util.friendlySize(preview.temporary_bytes),preview.unknown,
+            Util.friendlySize(preview.free),preview.downloaded,preview.duplicate,preview.invalid),
+        ok_text="加入队列",cancel_text="取消",ok_callback=function()
+            local counts,add_error=self.service:enqueue(items,preview.account_id)
+            if not counts then UIManager:show(InfoMessage:new{text=tostring(add_error)});return end
+            if counts.added==0 then UIManager:show(InfoMessage:new{text="这些卷已下载或已在队列中。"});return end
+            self:notifyChanged()
+            self.run_when_online(function()
+                if self.service:account()~=preview.account_id then
+                    UIManager:show(InfoMessage:new{text="账号已变化，原队列保持暂停。"});return
+                end
+                local started,start_error=self.service:resume()
+                if not started then UIManager:show(InfoMessage:new{text="已入队 "..counts.added.." 卷，暂未启动："..tostring(start_error)}) end
+            end)
+        end,
+    })
+    return true
+end
+
 function Downloader:open(path)
+    if not Guard.ensure() then UIManager:show(InfoMessage:new{text=Guard.reason});return nil,Guard.reason end
+    if self.preprocess and self.preprocess:isLocked(path) then
+        UIManager:show(InfoMessage:new{text="这本漫画正在处理，请等待任务结束后再阅读。"})
+        return nil
+    end
     ReaderUI:showReader(path)
 end
 
 function Downloader:_finishChanged()
+    if not self.active and self.resource_token then
+        self.coordinator:release(self.resource_token)
+        self.resource_token=nil
+    end
     if self.on_changed then pcall(self.on_changed) end
 end
 
@@ -37,21 +83,39 @@ function Downloader:notifyChanged()
 end
 
 function Downloader:download(item)
+    if not Guard.ensure() then UIManager:show(InfoMessage:new{text=Guard.reason});return nil,Guard.reason end
     if self.active then
         UIManager:show(InfoMessage:new{ text = "已有一个下载任务正在进行。" })
         return
     end
-    local final_path = self.storage:itemPath(item)
-    if self.storage:isDownloaded(item) then
+    local local_path = self.storage:resolveLocalPath(item)
+    if local_path then
         UIManager:show(ConfirmBox:new{
-            text = "这本漫画已经下载完成。\n\n" .. final_path,
+            text = "这本漫画已经下载完成。\n\n" .. local_path,
             cancel_text = "关闭",
             ok_text = "打开阅读",
-            ok_callback = function() self:open(final_path) end,
+            ok_callback = function()
+                local path = self.storage:resolveLocalPath(item)
+                if path then self:open(path) end
+            end,
         })
         return
     end
+    if self.service then return self:enqueue({item}) end
 
+    local final_path, path_err = self.storage:resolveDownloadPath(item)
+    if not final_path then
+        UIManager:show(InfoMessage:new{ text = "下载路径不可用或与其他漫画冲突：" .. tostring(path_err) })
+        return
+    end
+
+    if self.coordinator then
+        self.resource_token=self.coordinator:acquire("download")
+        if not self.resource_token then
+            UIManager:show(InfoMessage:new{text="正在进行图像处理或文件校验，请稍后再下载。"})
+            return
+        end
+    end
     self.active = true
     self.cancelled = false
     self.storage:record(item, "preparing")
@@ -75,8 +139,16 @@ function Downloader:download(item)
             return
         end
 
-        local part_path = self.storage:partPath(fresh)
-        final_path = self.storage:itemPath(fresh)
+        final_path, path_err = self.storage:resolveDownloadPath(fresh)
+        if not final_path then
+            self.active = false
+            dialog:close()
+            self.storage:record(fresh, "failed", { error = "下载路径不可用或冲突" })
+            UIManager:show(InfoMessage:new{ text = "下载路径不可用或与其他漫画冲突：" .. tostring(path_err) })
+            self:_finishChanged()
+            return
+        end
+        local part_path = final_path .. ".part"
         local total = tonumber(fresh.file_size) or tonumber(item.file_size) or 0
         local started_at = Util.now()
         self.storage:record(fresh, "downloading", { bytes = 0, total = total })

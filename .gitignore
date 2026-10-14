@@ -17,3 +17,7 @@ dist*/
 settings/
 cache/
 downloads/
+
+# Reproducible native prototypes; ship only verified target builds separately.
+native/preprocess/build/
+__pycache__/
