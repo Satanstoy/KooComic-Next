@@ -35,29 +35,30 @@ local lfs=require("libs/libkoreader-lfs")
 local directory="/tmp/koocomic-catalog-"..parent
 assert(lfs.mkdir(directory))
 local account="42"
+local count=5000
 local source={}
-for index=1,65 do source[index]={vol_id=index,file_md5="id"..index,vol_name="Original "..index,
+for index=1,count do source[index]={vol_id=index,file_md5="id"..index,vol_name="Original "..index,
     file_url="https://example.test/signed/"..index,vol_series="Series",count_page=100} end
 local store=Store:new{directory=directory}
 local library=Library:new({library=function(_,limit)
     assert(tonumber(ffi.C.getpid())~=parent,"real catalog IO must execute in the child")
-    local data={};for index=1,math.min(limit,65) do data[index]=source[index] end
-    return {data=data,total=65}
+    local data={};for index=1,math.min(limit,count) do data[index]=source[index] end
+    return {data=data,total=count}
 end},{itemKey=function(_,item) return item.file_md5 end},
     {account=function() return account end,store=store,runner=runner})
 done=false
-assert(library:refreshAsync(function(items,err) assert(items and #items==65,err);done=true end))
+assert(library:refreshAsync(function(items,err) assert(items and #items==count,err);done=true end))
 for _=1,300 do
     if done then break end
     local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
     ffi.C.usleep(5000)
 end
-assert(done and store:load("42").entries[65].title=="Original 65")
+assert(done and store:load("42").entries[count].title=="Original "..count)
 local snapshot_file=assert(io.open(directory.."/42.json","rb"))
 local persisted=snapshot_file:read("*a");snapshot_file:close()
 assert(not persisted:find("signed/",1,true),"signed URLs must never reach persistent cache")
 library:clear()
-assert(library:loadCache() and #library.items==65 and library.items[1].file_url==nil)
+assert(library:loadCache() and #library.items==count and library.items[1].file_url==nil)
 account="99";assert(not library:loadCache() and #library.items==0)
 local victim=directory.."/victim"
 local file=assert(io.open(victim,"wb"));file:write("unchanged");file:close()

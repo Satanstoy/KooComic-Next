@@ -26,7 +26,7 @@ end
 local states={pending=true,preparing=true,downloading=true,validating=true,completed=true,
     failed=true,cancelled=true,interrupted=true}
 local errors={worker_failed=true,cancelled=true,interrupted=true,network=true,unauthorized=true,forbidden=true,
-    no_space=true,path_conflict=true,invalid_epub=true,account_changed=true}
+    no_space=true,path_conflict=true,invalid_epub=true,account_changed=true,catalog_missing=true}
 local warnings={metadata_warning=true,durability_warning=true}
 
 local function entry(account,raw)

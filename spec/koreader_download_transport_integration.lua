@@ -49,7 +49,7 @@ assert(writer:addFileFromMemory("chapter.xhtml","<html><body>Generated test</bod
 assert(files:write(directory.."/bad.html","<html>Not an EPUB</html>"))
 local listener=assert(socket.bind("127.0.0.1",0));local _,port=listener:getsockname();listener:close()
 local server=assert(Util.runInSubProcess(function()
-    os.execute("python3 -m http.server "..port.." --bind 127.0.0.1 --directory "..directory.." >/dev/null 2>&1")
+    os.execute(string.format("python3 %q %q %d >/dev/null 2>&1",root.."/spec/http_fixture_server.py",directory,port))
 end,false,false))
 local function tests()
     local ready=false
@@ -85,6 +85,10 @@ local function tests()
     finished=false
     assert(transport:start({entry={}},directory.."/bad.epub.part",function(value) result=value;finished=true end));pump()
     assert(result.error_code=="invalid_epub" and not result.validated)
+    transport.resolve=function() return {file_url=base.."/source.epub?generation=0"} end
+    finished=false
+    assert(transport:start({entry={}},directory.."/expired.epub.part",function(value) result=value;finished=true end));pump()
+    assert(result.error_code=="forbidden","fixture server must actually reject an expired signature")
     transport.resolve=function() ffi.C.usleep(2000000);return {file_url=base.."/source.epub"} end
     finished=false
     local handle=assert(transport:start({entry={}},directory.."/cancel.epub.part",function(value) result=value;finished=true end))
@@ -148,8 +152,12 @@ local function tests()
     local source_items={}
     for index=1,20 do source_items[index]={file_md5="service-"..index,vol_name="Service "..index,
         file_size=job.entry.remote_size,file_url=base.."/source.epub"} end
+    transport.api.BASE=base;transport.api.settings={account=function() return {uin=account} end}
+    local library=require("koobone.library"):new(transport.api,storage,{account=function() return account end,
+        runner=require("koobone.async_task"):new{schedule=function(_,callback) scheduled[#scheduled+1]=callback end}})
+    library.account_id=account;library.urls_at=os.time()-61;library.items=source_items
     local options={settings={account=function() return {uin=account} end},storage=storage,api=transport.api,
-        library={account_id=account,urls_at=os.time(),items=source_items},directory=directory.."/production",
+        library=library,directory=directory.."/production",
         space=function() return 128*1024*1024 end,is_in_use=function() return false end,
         schedule=function(_,callback) scheduled[#scheduled+1]=callback end}
     local service=Service:new(options)
@@ -163,14 +171,38 @@ local function tests()
     local batch_result
     service.options.on_batch=function(value) batch_result=value end
     assert(service:resume())
+    local expired_again=false
     for _=1,8000 do
         if batch_result then break end
+        if not expired_again and service.queue.jobs[10].state=="completed" then library.urls_at=os.time()-61;expired_again=true end
         local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
         ffi.C.usleep(5000)
     end
     assert(batch_result and batch_result.completed==20 and batch_result.skipped==3 and batch_result.failed==0,
         "production service must emit one accurate restarted mixed-batch summary")
     for _,item in ipairs(source_items) do assert(files:hash(storage:itemPath(item))==files:hash(source)) end
+    local function stats()
+        return assert(transport.api:requestJson{url=base.."/stats.json",method="GET",include_session=false})
+    end
+    local observed=stats()
+    assert(observed.counts["/vol_list.php"]==2 and #observed.generations==20 and
+        observed.generations[1]=="1" and observed.generations[20]=="2",
+        "actual expired-index HTTP must refresh twice and share signatures across twenty volumes")
+    local denied={}
+    for _,code in ipairs({401,403}) do
+        local item={file_md5="denied-"..code,vol_name="Denied "..code,file_size=job.entry.remote_size,
+            file_url=base..(code==401 and "/unauthorized.epub" or "/forbidden.epub")}
+        denied[#denied+1]=item;library.items[#library.items+1]=item
+    end
+    batch_result=nil;assert(service:enqueue(denied,account).added==2 and service:resume())
+    for _=1,1000 do
+        if batch_result then break end
+        local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+        ffi.C.usleep(5000)
+    end
+    observed=stats()
+    assert(batch_result and batch_result.failed==2 and observed.counts["/unauthorized.epub"]==1 and
+        observed.counts["/forbidden.epub"]==1,"actual 401/403 must not automatically retry")
     local BB=require("ffi/blitbuffer")
     local cover=BB.new(8,8,BB.TYPE_BBRGB32);cover:fill(BB.COLOR_WHITE)
     assert(cover:writeToFile(directory.."/cover.png","png"));cover:free()

@@ -10,7 +10,7 @@ local View={}
 local views=setmetatable({},{__mode="k"})
 local names={pending="等待",preparing="准备中",downloading="下载中",validating="校验中",completed="完成",
     failed="失败",cancelled="已取消",interrupted="中断"}
-local errors={network="网络连接失败",unauthorized="登录已过期",forbidden="下载地址被拒绝",no_space="可用空间不足",
+local errors={network="网络连接失败",unauthorized="登录已过期",forbidden="下载地址被拒绝",catalog_missing="漫画已不在当前书库",no_space="可用空间不足",
     path_conflict="文件变化、占用或保存失败",invalid_epub="EPUB校验失败",account_changed="账号已变化",
     worker_failed="下载进程失败",interrupted="上次运行中断",cancelled="已取消"}
 

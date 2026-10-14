@@ -25,6 +25,12 @@ local failed=assert(work());assert(failed.error_code=="invalid_epub")
 transport.resolve=function() return nil end
 assert(transport:start({entry={}},"/books/book.epub.part",function() end))
 assert(work().error_code=="network")
+for _,reason in ipairs({"catalog_missing","account_changed"}) do
+    transport.resolve=function() return nil,reason end
+    downloaded=false
+    assert(transport:start({entry={}},"/books/book.epub.part",function() end))
+    assert(work().error_code==reason and not downloaded,"missing/deleted or changed-account entries must not be treated as retryable HTTP errors")
+end
 assert(not transport:start({entry={}},"/books/unsafe.txt",function() end),"only explicit .part paths may be written")
 transport.resolve=function() return {file_url="https://private.invalid/signed"} end
 transport.validate=function() return true end

@@ -19,8 +19,10 @@ function Transport:start(job,path,done,hooks)
     if job.entry.remote_size and (type(job.entry.remote_size)~="number" or job.entry.remote_size<=0 or
             job.entry.remote_size>maximum or job.entry.remote_size~=math.floor(job.entry.remote_size)) then return nil,"invalid expected size" end
     return self.runner:start(function()
-        local fresh=self.resolve(job.entry)
-        if type(fresh)~="table" or type(fresh.file_url)~="string" or fresh.file_url=="" then return {error_code="network"} end
+        local fresh,resolve_error=self.resolve(job.entry)
+        if type(fresh)~="table" or type(fresh.file_url)~="string" or fresh.file_url=="" then
+            return {error_code=(resolve_error=="catalog_missing" or resolve_error=="account_changed") and resolve_error or "network"}
+        end
         if not self.files:isSafe(path) or self.files:exists(path) then return {error_code="path_conflict"} end
         local output=self.files:exclusiveWriter(path)
         if not output then return {error_code="path_conflict"} end

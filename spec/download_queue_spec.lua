@@ -133,3 +133,6 @@ assert(batch_queue:retry(old_job.id,false,true) and old_job.retry_base==3,"autom
 old_job.state="failed";batch_queue.batch=nil
 assert(batch_queue:retry(old_job.id,false,false,true) and batch_queue.batch.ids[old_job.id],
     "explicit history retry must create a durable result batch")
+assert(batch_queue:resume() and batch_queue:tick())
+callbacks[#callbacks].done(false,{error_code="catalog_missing"})
+assert(old_job.error_code=="catalog_missing","catalog deletion must retain its nonretryable typed cause")

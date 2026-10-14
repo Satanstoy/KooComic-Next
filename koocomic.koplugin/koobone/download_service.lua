@@ -32,11 +32,12 @@ function Service:_nativeWorker()
     local validator=Epub:new{validation_only=true,reader=function() return Archive.Reader:new() end}
     local transport=require("koobone.download_transport"):new{files=files,api=self.api,schedule=self.schedule,
         resolve=function(dto)
-            if self:account()~=dto.account_id then return nil end
+            if self:account()~=dto.account_id then return nil,"account_changed" end
             for _,item in ipairs(self.library.items) do
                 local entry=Entry.normalize(dto.account_id,item)
                 if entry and entry.id==dto.id then return item end
             end
+            return nil,"catalog_missing"
         end,
         validate=function(path) return validator:validate(path) end}
     local worker=Worker:new{files=files,storage=self.storage,transport=transport,directory=self.directory.."/jobs",
