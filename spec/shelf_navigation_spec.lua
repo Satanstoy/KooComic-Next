@@ -55,3 +55,9 @@ nav.identity_options=function() return {volume_id_verified=true} end
 assert(#nav:versions(versions[1])==2 and nav:items(versions)[1]._series.volume_count==2)
 assert(#nav:versions(versions[3])==1,"same title on another volume is not a version")
 print("shelf navigation spec: OK")
+local covers={{file_md5="first",vol_name="Volume 1",vol_series="Cover series",vol_author="A",vol_index=1},
+    {file_md5="second",vol_name="Volume 2",vol_series="Cover series",vol_author="A",vol_index=2,_koobone_cover_path="/cache/second.png"}}
+nav:setBooks(covers)
+assert(nav:items(covers)[1].file_md5=="second","missing first cover must fall back to another available volume")
+nav.sort_mode="recent"
+assert(nav:items({covers[2],covers[1]})[1].file_md5=="second","cover choice must not follow refresh/download order")

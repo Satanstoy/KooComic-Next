@@ -14,6 +14,10 @@ local grid_available, BookshelfGrid = pcall(require, "koobone.ui.bookshelf_grid"
 
 local Bookshelf = {}
 Bookshelf.__index = Bookshelf
+local function coverKey(shelf,item)
+    local url=shelf.cover_cache and shelf.cover_cache:url(item) or item.cover_url or item.cover or item.cover_small
+    return shelf.navigation:rowKey(item).."\0"..tostring(url or "")
+end
 
 function Bookshelf:new(options)
     local shelf = setmetatable({
@@ -33,10 +37,16 @@ function Bookshelf:new(options)
         sort_mode = "recent",
         filter_mode = "all",
         cover_generation = 0,
+        cover_failures = {},
         grid_view = nil,
     }, self)
     shelf.navigation = Navigation:new{account_id=options.settings:account().uin, storage=options.storage,
-        identity_options=function(item) return shelf.library.identityOptions and shelf.library:identityOptions(item) or {} end}
+        identity_options=function(item) return shelf.library.identityOptions and shelf.library:identityOptions(item) or {} end,
+        cover_available=function(item)
+            if shelf.cover_failures[coverKey(shelf,item)] then return false end
+            if shelf.cover_cache then return shelf.cover_cache:localPath(item) or shelf.cover_cache:url(item) end
+            return item._koobone_cover_path or item.cover_url or item.cover or item.cover_small or item.thumb_url or item.thumbnail
+        end}
     shelf.selection=Selection:new(options.settings:account().uin)
     shelf.local_manager=options.local_manager or LocalManager:new{storage=options.storage,downloader=options.downloader,
         coordinator=options.downloader.coordinator}
@@ -122,27 +132,46 @@ function Bookshelf:_prefetchCovers(items)
     local style=self.settings:ui().series_style
     for _,item in ipairs(items) do
         if not (item._series and style=="text") then
-            local members=(item._series and style=="collage") and item._series.books or {item}
-            for index=1,math.min(4,#members) do
+            local members=item._series and item._series.books or {item}
+            local limit=item._series and style~="collage" and #members or math.min(4,#members)
+            for index=1,limit do
                 local member=members[index]
-                if not seen[member] then candidates[#candidates+1]=member;seen[member]=true end
+                if not seen[member] then candidates[#candidates+1]={item=member,target=item._series and style~="collage" and item or nil};seen[member]=true end
             end
         end
     end
-    for _, item in ipairs(candidates) do
-        if not item._koobone_cover_path and self.cover_cache:url(item) then
-            pending[#pending + 1] = item
+    for _, candidate in ipairs(candidates) do
+        local item=candidate.item
+        if (item._koobone_cover_path or self.cover_cache:url(item)) and
+                not (candidate.target and self.cover_failures[coverKey(self,item)]) then
+            pending[#pending + 1] = candidate
         end
     end
     local index = 0
+    local completed={}
     local function fetchNext()
         if generation ~= self.cover_generation or not self.grid_view or self.grid_view.closed then return end
-        local item = pending[index+1]
-        if not item then return end
+        local candidate=pending[index+1]
+        while candidate and candidate.target and completed[candidate.target] do index=index+1;candidate=pending[index+1] end
+        if not candidate then return end
+        local item=candidate.item
+        local needs_fetch=self.cover_cache.needsFetch and self.cover_cache:needsFetch(item) or not item._koobone_cover_path
+        if item._koobone_cover_path and not needs_fetch then
+            if candidate.target then
+                local changed=candidate.target._koobone_cover_path~=item._koobone_cover_path
+                candidate.target._koobone_cover_path=item._koobone_cover_path;completed[candidate.target]=true
+                if changed then self.grid_view:refreshCovers() end
+            end
+            index=index+1;UIManager:scheduleIn(0.05,fetchNext);return
+        end
         local called,handle,err=pcall(self.cover_cache.fetchAsync,self.cover_cache,item,function(path)
             if generation~=self.cover_generation or not self.grid_view or self.grid_view.closed then return end
             self.cover_handle=nil
-            if path then item._koobone_cover_path=path;self.grid_view:refreshCovers() end
+            if path then
+                item._koobone_cover_path=path
+                if candidate.target then candidate.target._koobone_cover_path=path;completed[candidate.target]=true end
+                self.grid_view:refreshCovers()
+            elseif candidate.target then self.cover_failures[coverKey(self,item)]=true end
             UIManager:scheduleIn(0.05,fetchNext)
         end)
         if called and handle then

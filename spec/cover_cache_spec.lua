@@ -30,6 +30,9 @@ assert(cache:url{ cover_small = "/covers/a.jpg" } == "https://bookof.hk/covers/a
 assert(cache:url{ cover_url = "//img.example.test/a.png" } == "https://img.example.test/a.png")
 assert(cache:url{ cover = "http://bookof.hk/a.webp" } == "https://bookof.hk/a.webp")
 assert(cache:url{} == nil)
+local sizes={file_md5="sizes",cover_small="/covers/low.jpg",cover_url="/covers/full.jpg"}
+assert(cache:url(sizes)=="https://bookof.hk/covers/full.jpg","full cover must take priority over a thumbnail")
+assert(cache:path(sizes)~=cache:path{file_md5="sizes",cover_small=sizes.cover_small},"full cover must not reuse the thumbnail cache identity")
 
 local first = cache:path{ file_md5 = "stable-id", cover_url = "/covers/a.jpg" }
 local second = cache:path{ file_md5 = "stable-id", cover_url = "/changed/a.jpg" }

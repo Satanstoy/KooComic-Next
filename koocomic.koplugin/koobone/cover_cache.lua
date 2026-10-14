@@ -72,9 +72,10 @@ function CoverCache:new(api,options)
 end
 
 function CoverCache:url(item)
-    local url = item and (item.cover_small or item.cover_url or item.cover or
-        item.thumb_url or item.thumbnail) or nil
-    url = tostring(url or "")
+    local url=""
+    for _,key in ipairs({"cover_url","cover","cover_small","thumb_url","thumbnail"}) do
+        if item and type(item[key])=="string" and item[key]~="" then url=item[key];break end
+    end
     if url == "" then return nil end
     if url:match("^//") then return "https:" .. url end
     if url:match("^/") then return self.api.BASE .. url end
@@ -89,24 +90,36 @@ function CoverCache:path(item)
     if not url or url == "" then
         local key=item and (item.file_md5 or item.vol_id)
         if not key then return nil end
-        for _,ext in ipairs({"jpg","png","gif","webp"}) do
-            local candidate=ffiUtil.joinPath(self.directory,hash(key).."."..ext)
+        for _,tier in ipairs({"-full",""}) do for _,ext in ipairs({"jpg","png","gif","webp"}) do
+            local candidate=ffiUtil.joinPath(self.directory,hash(key)..tier.."."..ext)
             if fileSize(candidate)>0 and looksLikeImage(candidate) then return candidate end
-        end
-        return ffiUtil.joinPath(self.directory,hash(key)..".jpg")
+        end end
+        return ffiUtil.joinPath(self.directory,hash(key).."-full.jpg")
     end
     local key = item.file_md5 or item.vol_id or url
-    return ffiUtil.joinPath(self.directory, hash(key) .. "." .. extension(url))
+    local full=(type(item.cover_url)=="string" and item.cover_url~="") or (type(item.cover)=="string" and item.cover~="")
+    return ffiUtil.joinPath(self.directory, hash(key) .. (full and "-full" or "") .. "." .. extension(url))
 end
 
 function CoverCache:localPath(item)
     local path = self:path(item)
     if path and fileSize(path) > 0 and looksLikeImage(path) then return path end
+    local key=item and (item.file_md5 or item.vol_id)
+    if key then for _,ext in ipairs({"jpg","png","gif","webp"}) do
+        local candidate=ffiUtil.joinPath(self.directory,hash(key).."."..ext)
+        if fileSize(candidate)>0 and looksLikeImage(candidate) then return candidate end
+    end end
     return nil
 end
 
+function CoverCache:needsFetch(item)
+    if not self:url(item) then return false end
+    local path=self:path(item)
+    return not (path and fileSize(path)>0 and looksLikeImage(path))
+end
+
 function CoverCache:fetch(item)
-    local existing = self:localPath(item)
+    local existing = not self:needsFetch(item) and self:localPath(item)
     if existing then return existing end
     local url = self:url(item)
     local path = self:path(item)
@@ -143,7 +156,7 @@ end
 function CoverCache:fetchAsync(item,complete)
     if self.active then return nil,"cover worker busy" end
     local cached=self:localPath(item)
-    if cached then complete(cached);return {cancel=function() return false end} end
+    if cached and not self:needsFetch(item) then complete(cached);return {cancel=function() return false end} end
     self.runner=self.runner or require("koobone.async_task"):new{max_bytes=4096,timeout=120}
     local flight={}
     self.active=flight

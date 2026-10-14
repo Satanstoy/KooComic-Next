@@ -62,6 +62,31 @@ assert(#fetched==4 and fetched[1]==members[1] and fetched[4]==members[4],"collag
 ui.series_style="text";fetched={}
 shelf:_prefetchCovers({{_series={books=members}}})
 assert(#callbacks==0,"text style must not schedule artwork downloads")
+ui.series_style="divider";fetched={}
+local fallback_members={{file_md5="cover-first",vol_name="Volume 1",vol_series="Cover",vol_author="A",vol_index=1,cover_url="first"},
+    {file_md5="cover-second",vol_name="Volume 2",vol_series="Cover",vol_author="A",vol_index=2,cover_url="second"}}
+shelf.cover_cache.url=function(_,item) return item.cover_url end
+shelf.cover_cache.localPath=function(_,item) return item._koobone_cover_path end
+shelf.cover_cache.fetchAsync=function(_,item,done)
+    fetched[#fetched+1]=item.file_md5
+    if item.file_md5=="cover-first" then done(nil) else item._koobone_cover_path="fallback-cover";done("fallback-cover") end
+    return {cancel=function() return true end}
+end
+shelf.navigation:setBooks(fallback_members)
+local fallback_card=shelf.navigation:items(fallback_members)[1]
+shelf:_prefetchCovers({fallback_card})
+for _=1,20 do if #callbacks==0 then break end;table.remove(callbacks,1)() end
+assert(#fetched==2 and fallback_card._koobone_cover_path=="fallback-cover","failed first cover must fetch the next available series member")
+assert(shelf.navigation:items({fallback_members[2],fallback_members[1]})[1].file_md5=="cover-second","refresh must preserve the successful representative after a first-cover failure")
+shelf.cover_failures={};fetched={}
+local refreshed=0;shelf.grid_view.refreshCovers=function() refreshed=refreshed+1 end
+fallback_card=shelf.navigation:items(fallback_members)[1]
+shelf:_prefetchCovers({fallback_card})
+for _=1,20 do if #callbacks==0 then break end;table.remove(callbacks,1)() end
+assert(#fetched==1 and fallback_card._koobone_cover_path=="fallback-cover" and refreshed>0,
+    "falling back to an already cached member must repaint the visible series card")
+fallback_members[1].cover_url="repaired-first-address"
+assert(shelf.navigation:items(fallback_members)[1].file_md5=="cover-first","a changed cover address must not inherit the previous address failure")
 shelf.cover_cache=nil
 shelf:show(books)
 current.on_view("volumes")

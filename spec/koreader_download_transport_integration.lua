@@ -207,9 +207,9 @@ local function tests()
     local cover=BB.new(8,8,BB.TYPE_BBRGB32);cover:fill(BB.COLOR_WHITE)
     assert(cover:writeToFile(directory.."/cover.png","png"));cover:free()
     local CoverCache=require("koobone.cover_cache")
-    local cache=CoverCache:new({BASE="https://fixture.invalid",download=function(_,_,path,settings)
+    local cache=CoverCache:new({BASE="https://fixture.invalid",download=function(_,url,path,settings)
         assert(tonumber(ffi.C.getpid())~=parent,"cover HTTP must execute in a child")
-        return transport.api:download(base.."/cover.png",path,settings)
+        return transport.api:download(base.."/"..assert(url:match("/([^/]+)$")),path,settings)
     end},{runner=require("koobone.async_task"):new{max_bytes=4096,
         schedule=function(_,callback) scheduled[#scheduled+1]=callback end}})
     cache.directory=directory.."/covers";assert(files:mkdir(cache.directory))
@@ -219,6 +219,16 @@ local function tests()
     end))
     assert(not finished,"cover prefetch must not block the UI")
     pump();assert(result and files:hash(result)==files:hash(directory.."/cover.png"))
+    local large=BB.new(128,192,BB.TYPE_BBRGB32);large:fill(BB.COLOR_BLACK)
+    assert(large:writeToFile(directory.."/full-cover.png","png"));large:free()
+    local thumbnail={file_md5="upgrade-cover",cover_small="https://fixture.invalid/cover.png"}
+    local small_path=cache:path(thumbnail);assert(files:copy(directory.."/cover.png",small_path))
+    local upgraded={file_md5=thumbnail.file_md5,cover_small=thumbnail.cover_small,cover_url="https://fixture.invalid/full-cover.png"}
+    assert(cache:localPath(upgraded)==small_path and cache:needsFetch(upgraded),"low cover must remain visible while full source is pending")
+    finished=false;result=nil
+    assert(cache:fetchAsync(upgraded,function(path) result=path;finished=true end));assert(not finished)
+    pump();assert(result~=small_path and files:hash(result)==files:hash(directory.."/full-cover.png"),"real child HTTP must upgrade a cached thumbnail")
+    assert(cache:localPath{file_md5=thumbnail.file_md5}==result and not cache:needsFetch(upgraded),"offline lookup must prefer the completed full-source cache")
 end
 local ok,err=pcall(tests)
 Util.terminateSubProcess(server)

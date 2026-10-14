@@ -7,7 +7,7 @@ Navigation.__index = Navigation
 function Navigation:new(options)
     return setmetatable({account_id=tostring(options.account_id or "local"), storage=options.storage,
         mode="series", page=1, query="", sort_mode="recent", filter_mode="all", memories={}, books={},
-        identity_options=options.identity_options}, self)
+        identity_options=options.identity_options,cover_available=options.cover_available}, self)
 end
 
 function Navigation:setAccount(id)
@@ -135,7 +135,14 @@ function Navigation:items(visible)
         end
         if matched then
             local card = {}
-            for key, value in pairs(members[1]) do card[key] = value end
+            local representative=members[1]
+            for _,member in ipairs(members) do
+                local available
+                if self.cover_available then available=self.cover_available(member)
+                else available=member._koobone_cover_path or member.cover_url or member.cover or member.cover_small or member.thumb_url or member.thumbnail end
+                if available and available~="" then representative=member;break end
+            end
+            for key, value in pairs(representative) do card[key] = value end
             card.vol_name = group.title
             card._series = {key=group.key, title=group.title, books=members,
                 volume_count=group.volume_count, downloaded_count=downloaded,rank=rank}
