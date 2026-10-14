@@ -13,6 +13,8 @@ make -C native/preprocess
 python3 spec/native_preprocess_spec.py
 ```
 
-目标交叉编译命令形式：`make -C native/preprocess TARGET=kindlehf CC=arm-kindlereader-linux-gnueabihf-gcc CFLAGS='-O2 -Wall -Wextra -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard'`。工具链前缀与 ABI 必须依据对应 KOReader koxtoolchain 发行版实测，不把此形式当作已经成功构建的设备包；检查 `file`、`readelf -h/-d`、导出符号及设备加载结果后才允许打包。
+实验包通过 `python3 scripts/package_colorsoft.py --output dist-colorsoft` 构建；可用 `--sdk-archive /path/to/kindlehf.tar.zst` 复用本地下载。固定官方 koxtoolchain `2026.08` 的 `kindlehf.tar.zst`，SHA-256 `8cc7dfbd71abd78f9e947d6b2e20670288a4402edc7b07176bca791f7eaf87d0`，实际前缀 `arm-kindlehf-linux-gnueabihf`。脚本先校验 SDK，再编译 ARMv7/NEON hard-float 库，检查 ELF/依赖/导出符号，运行 QEMU 静态算法烟测，并打包当前完整插件、原生库、两份许可证和来源清单；不会更新 stable 清单或发布 Release。
+
+QEMU 静态烟测不是 `.so` 动态加载验收。该 SDK 的 glibc 2.20 动态加载器在本机 QEMU 中于首次系统调用前触发 `do-rel.h` 断言，使用非 PIE 探针仍复现；因此不以其结果验证设备动态加载。实验清单保留 `device_verified=false` 和 `dynamic_device_load_verified=false`，设备 ABI、实际画质与内存性能仍必须实机验收。
 
 `memory_budget` 使用保守的 64 bytes/pixel 加固定余量作准入估算，不是严格峰值保证。实际隔离进程仍需系统内存限额、磁盘预算与取消控制；复杂 FFT 尺寸的实际峰值和时长需测量。构建输出由 Git 忽略，默认插件发行脚本不会打包此 host 库。Colorsoft 效果、翻页性能和 ABI 尚未验证。

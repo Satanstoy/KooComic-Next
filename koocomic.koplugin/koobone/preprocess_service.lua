@@ -7,6 +7,10 @@ local Profile=require("koobone.preprocess_profile")
 local Service={}
 Service.__index=Service
 local instances={}
+local plugin_root=assert(debug.getinfo(1,"S").source:sub(2):match("^(.*)/koobone/[^/]+$"))
+function Service.nativeLibraryPath()
+    return plugin_root.."/native/moire-kindlehf.so"
+end
 local function copy(value)
     if type(value)~="table" then return value end
     local result={};for key,item in pairs(value) do result[key]=copy(item) end;return result
@@ -49,8 +53,7 @@ function Service:new(options)
         if not native then
             local Device=require("device")
             assert(Device.model=="KindleColorSoft" and ffi.arch=="arm","本构建只支持 Colorsoft ARM hard-float")
-            local location=debug.getinfo(1,"S").source:sub(2):match("^(.*)/[^/]+$")
-            native=location.."/native/moire-kindlehf.so"
+            native=Service.nativeLibraryPath()
         end
         self.files=Files:new{roots={directory,self.storage:downloadDir()}}
         assert(self.files:mkdir(directory),"任务目录不可用")

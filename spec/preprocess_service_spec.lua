@@ -1,6 +1,9 @@
 package.path="./koocomic.koplugin/?.lua;"..package.path
 local available,Service=pcall(require,"koobone.preprocess_service")
 assert(available,"downloaded-file preprocessing service is missing")
+assert(type(Service.nativeLibraryPath)=="function","default native library path must match the packaged plugin/native directory")
+assert(Service.nativeLibraryPath():match("koocomic%.koplugin/native/moire%-kindlehf%.so$"),
+    "default library must not resolve under koobone/native")
 local disabled=Service:new{storage={},directory="/not-created-by-test"}
 assert(disabled.available==false and type(disabled.reason)=="string")
 assert(disabled:submit({})==nil and disabled:isActive()==false)

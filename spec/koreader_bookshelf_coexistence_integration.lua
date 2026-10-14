@@ -20,10 +20,22 @@ end
 writer:close()
 local registry={}
 local host={menu={registerToMainMenu=function(_,plugin) registry[plugin.name]=plugin end}}
+local lfs=require("libs/libkoreader-lfs")
+local plugins=directory.."-plugins";assert(require("koobone.preprocess_files"):new{roots={plugins}}:mkdir(plugins))
+ffi.cdef[[int symlink(const char *target, const char *linkpath);]]
+assert(ffi.C.symlink(reference,plugins.."/bookshelf.koplugin")==0)
+assert(ffi.C.symlink(root.."/koocomic.koplugin",plugins.."/koocomic.koplugin")==0)
+G_reader_settings:saveSetting("extra_plugin_paths",{plugins})
+local disabled={}
+for name in lfs.dir("plugins") do if name:match("%.koplugin$") then disabled[name:sub(1,-10)]=true end end
+G_reader_settings:saveSetting("plugins_disabled",disabled)
+local Loader=require("pluginloader")
+local modules={};for _,module in ipairs(Loader:loadPlugins()) do modules[module.name]=module end
+assert(modules.bookshelf and modules.koocomic)
 local original_path=package.path
 local function start(name)
-    local plugin=dofile((name=="bookshelf" and reference or root.."/koocomic.koplugin").."/main.lua")
-    return plugin:new{ui=host,path=name=="bookshelf" and reference or root.."/koocomic.koplugin"}
+    local ok,plugin=Loader:createPluginInstance(modules[name],{ui=host})
+    assert(ok,plugin);return plugin
 end
 if order=="bookshelf-first" then start("bookshelf");start("koocomic") else start("koocomic");start("bookshelf") end
 assert(registry.bookshelf and registry.koocomic and package.path==original_path)
@@ -50,6 +62,28 @@ Settings.save("active_chip","all")
 registry.bookshelf:show()
 local shelf=registry.bookshelf._widget
 assert(shelf and shelf._selection and UI:isWidgetShown(shelf),"actual Bookshelf widget must open alongside KooComic")
+local Reader=require("apps/reader/readerui")
+local function settle(predicate)
+    for _=1,1000 do UI:_checkTasks();if predicate() then return end;require("ffi/util").usleep(10000) end
+    assert(predicate(),"native reader/shelf transition timed out")
+end
+local book=assert(scanned[1])
+shelf:_openBook(book)
+settle(function() return Reader.instance and Reader.instance.document and Reader.instance.document.file==second_path end)
+local reader=Reader.instance
+assert(reader.bookshelf and reader.koocomic,"real ReaderUI must register both plugins through PluginLoader")
+assert(reader.document:getPageCount()>0);reader:onClose()
+settle(function() return Reader.instance==nil and registry.bookshelf._widget and UI:isWidgetShown(registry.bookshelf._widget) end)
+assert(reader.document==nil,"closing reader must free actual document")
+shelf=registry.bookshelf._widget
+local comic_shelf=require("koobone.ui.bookshelf_grid").show{books={second},mode="volumes",storage=comic.storage,ui={text_size="normal"}}
+comic.downloader:open(second_path)
+settle(function() return Reader.instance and Reader.instance.document and Reader.instance.document.file==second_path end)
+reader=Reader.instance;reader:onClose()
+settle(function() return Reader.instance==nil and UI:isWidgetShown(comic_shelf) end)
+assert(reader.document==nil,"KooComic open/close must release the actual document")
+comic_shelf:_close();registry.bookshelf:show()
+shelf=registry.bookshelf._widget
 shelf._selection:enterMode();shelf._selection:add(second_path)
 require("lib/bookshelf_bulk_actions").show{selection=shelf._selection,bw=shelf}
 local delete
