@@ -116,7 +116,11 @@ for _,kind in ipairs({"rewrite","replace","source-rewrite","source-replace","pre
     local marker=directory.."/pre-status-replace-marker"
     files.hash=function(self,path)
         if kind=="pre-status-replace" and path==temporary and not self:exists(marker) then
-            local bytes=read(path);assert(self:remove(path));assert(self:write(path,bytes));assert(self:write(marker,"replaced"))
+            local kept=assert(io.open(path,"rb"));local bytes=kept:read("*a")
+            local identity=self:identity(path)
+            assert(self:remove(path));assert(self:write(path,bytes))
+            assert(self:identity(path)~=identity,"replacement fixture must create a different inode")
+            kept:close();assert(self:write(marker,"replaced"))
         end
         return original_hash(self,path)
     end
