@@ -27,7 +27,7 @@ jobs:
       - name: Install Lua 5.1
         run: |
           sudo apt-get update
-          sudo apt-get install --yes lua5.1 qemu-user zstd
+          sudo apt-get install --yes lua5.1 qemu-user zstd dosfstools
 
       - name: Check for sensitive runtime files
         shell: bash
@@ -74,6 +74,7 @@ jobs:
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_update_package_integration.lua" "$GITHUB_WORKSPACE"
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_update_transaction_integration.lua" "$GITHUB_WORKSPACE"
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_update_bootstrap_integration.lua" "$GITHUB_WORKSPACE"
+          ./luajit "$GITHUB_WORKSPACE/spec/koreader_atomic_fallback_integration.lua" "$GITHUB_WORKSPACE"
           SDL_VIDEODRIVER=dummy ./luajit "$GITHUB_WORKSPACE/spec/koreader_portable_paths_integration.lua" "$GITHUB_WORKSPACE"
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_archive_crc_integration.lua" "$GITHUB_WORKSPACE"
           SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-http-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_download_transport_integration.lua" "$GITHUB_WORKSPACE"
@@ -88,6 +89,10 @@ jobs:
               done
             done
           done
+          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_shelf_layout_update_integration.lua" "$GITHUB_WORKSPACE"
+          for size in "600 800 167" "1072 1448 300" "1264 1680 300" "1448 1072 300"; do
+            SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-settings-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_settings_screen_integration.lua" "$GITHUB_WORKSPACE" $size
+          done
           git clone --filter=blob:none --no-checkout https://github.com/AndyHazz/bookshelf.koplugin.git /tmp/bookshelf-reference
           git -C /tmp/bookshelf-reference checkout --detach 2c8bfd8e53b73b24232e674e12ebc6168963aef5
           SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-visual-reference ./luajit "$GITHUB_WORKSPACE/spec/koreader_bookshelf_visual_comparison.lua" "$GITHUB_WORKSPACE" /tmp/bookshelf-reference
@@ -97,6 +102,11 @@ jobs:
           for order in bookshelf-first koocomic-first; do
             SDL_VIDEODRIVER=dummy KO_HOME="/tmp/koocomic-coexist-$order" ./luajit "$GITHUB_WORKSPACE/spec/koreader_bookshelf_coexistence_integration.lua" "$GITHUB_WORKSPACE" /tmp/bookshelf-reference "$order"
           done
+
+      - name: Verify atomic commits on a real FAT filesystem
+        run: |
+          sudo modprobe loop || true
+          ./scripts/verify_atomic_filesystem.sh /tmp/koreader-runtime/lib/koreader "$GITHUB_WORKSPACE" vfat
 
       - name: Verify unpublished Colorsoft experimental package
         run: python3 spec/colorsoft_package_spec.py

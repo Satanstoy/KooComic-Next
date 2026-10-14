@@ -6,6 +6,26 @@ local Json=require("json")
 local Files={}
 Files.__index=Files
 
+-- Linux errno numbers are stable across x86_64, arm and arm64, and the target
+-- device cannot resolve ffi.C.EINVAL-style names at load time, so the few we
+-- branch on live here as documented numbers.
+local EINTR,EINVAL,ENOSYS,EOPNOTSUPP=4,22,38,95
+-- renameat2(2) is a Linux-only syscall. Filesystems that do not implement its
+-- RENAME_NOREPLACE/RENAME_EXCHANGE flags (the vfat userstore on some Kindle
+-- models, for example) reject it with one of these errors, or the syscall
+-- number may be unknown on an unexpected architecture.
+local function atomicUnsupported(value)
+    return type(value)~="number" or value==EINVAL or value==ENOSYS or value==EOPNOTSUPP
+end
+local function defaultRenameAt2(ffi,parent,name,target_parent,target_name,flags)
+    local number=({x64=316,arm=382,arm64=276})[ffi.arch]
+    if not number then return nil,"unsupported architecture" end
+    local status=ffi.C.syscall(ffi.cast("long",number),ffi.cast("int",parent),ffi.cast("const char*",name),
+        ffi.cast("int",target_parent),ffi.cast("const char*",target_name),ffi.cast("unsigned int",flags))
+    if status==0 then return true end
+    return nil,ffi.errno()
+end
+
 local function openParent(path)
     local ffi=require("ffi")
     if ffi.os~="Linux" then return nil,"anchored output unavailable" end
@@ -28,7 +48,13 @@ local function openParent(path)
 end
 
 function Files:new(options)
-    return setmetatable({roots=assert(options.roots)},self)
+    return setmetatable({roots=assert(options.roots),rename_at2=options.rename_at2 or defaultRenameAt2},self)
+end
+
+-- Returns true on success, or nil plus the raw errno number, or a non-numeric
+-- reason string when the syscall number is unavailable on this architecture.
+function Files:_renameAt2(ffi,parent,name,target_parent,target_name,flags)
+    return self.rename_at2(ffi,parent,name,target_parent,target_name,flags)
 end
 
 function Files:isSafe(path)
@@ -107,7 +133,7 @@ function Files:exclusiveWriter(path)
             while offset<#data do
                 local count=tonumber(C.write(owner[0],ffi.cast("const char*",data)+offset,#data-offset))
                 if count and count>0 then offset=offset+count
-                elseif ffi.errno()~=C.EINTR then return nil,"exclusive output write failed" end
+                elseif ffi.errno()~=EINTR then return nil,"exclusive output write failed" end
             end
             return true
         end,
@@ -160,13 +186,44 @@ local function renameDirectories(self,source,target,exchange)
     if not parent then return nil,name end
     local target_parent,target_name=openParent(target)
     if not target_parent then ffi.C.close(parent);return nil,target_name end
-    local number=({x64=316,arm=382,arm64=276})[ffi.arch]
-    if not number then ffi.C.close(parent);ffi.C.close(target_parent);return nil,"atomic directory exchange unavailable" end
-    local status=ffi.C.syscall(ffi.cast("long",number),ffi.cast("int",parent),ffi.cast("const char*",name),
-        ffi.cast("int",target_parent),ffi.cast("const char*",target_name),ffi.cast("unsigned int",exchange and 2 or 1))
-    local synced=status==0 and ffi.C.fsync(parent)==0 and ffi.C.fsync(target_parent)==0
+    local ok,err=self:_renameAt2(ffi,parent,name,target_parent,target_name,exchange and 2 or 1)
+    local degraded=false
+    if not ok and atomicUnsupported(err) then
+        -- The filesystem rejected the atomic flag. Degrade to multi-step
+        -- renames; the update journal records directory identities and can
+        -- reconcile a partial exchange after a crash.
+        if not exchange then
+            if lfs.symlinkattributes(target,"mode") then
+                ffi.C.close(parent);ffi.C.close(target_parent)
+                return nil,"atomic directory operation unavailable or destination conflict"
+            end
+            local moved,move_error=os.rename(source,target)
+            if not moved then ffi.C.close(parent);ffi.C.close(target_parent);return nil,move_error or "directory move failed" end
+        else
+            local temporary=target..".kooc-exchange"
+            if not self:isSafe(temporary) or lfs.symlinkattributes(temporary,"mode") then
+                ffi.C.close(parent);ffi.C.close(target_parent)
+                return nil,"atomic directory operation unavailable or destination conflict"
+            end
+            local aside=os.rename(source,temporary)
+            local applied=aside and os.rename(target,source)
+            local finished=applied and os.rename(temporary,target)
+            if not finished then
+                if applied then os.rename(source,target) end
+                if aside then os.rename(temporary,source) end
+                ffi.C.close(parent);ffi.C.close(target_parent)
+                return nil,"directory exchange failed midway"
+            end
+        end
+        degraded=true
+    end
+    if not ok and not degraded then
+        ffi.C.close(parent);ffi.C.close(target_parent)
+        return nil,"atomic directory operation unavailable or destination conflict"
+    end
+    local synced=ok and ffi.C.fsync(parent)==0 and ffi.C.fsync(target_parent)==0
     ffi.C.close(parent);ffi.C.close(target_parent)
-    if status~=0 then return nil,"atomic directory operation unavailable or destination conflict" end
+    if degraded then return true,"non-atomic directory exchange degraded on this filesystem" end
     return true,not synced and "directory sync failed" or nil
 end
 function Files:exchangeDirectories(source,target) return renameDirectories(self,source,target,true) end
@@ -256,7 +313,7 @@ function Files:copyExclusive(source,target,expected,max_bytes,on_created)
         local count=tonumber(C.read(source_fd,buffer,65536))
         if count==0 then break end
         if count<0 then
-            if ffi.errno()~=C.EINTR then valid=false;break end
+            if ffi.errno()~=EINTR then valid=false;break end
         else
             bytes=bytes+count
             if bytes>max_bytes then valid=false;break end
@@ -280,14 +337,29 @@ function Files:renameNoReplace(source,target)
     if not parent then return nil,name end
     local target_parent,target_name=openParent(target)
     if not target_parent then ffi.C.close(parent);return nil,target_name end
-    local number=({x64=316,arm=382,arm64=276})[ffi.arch]
-    if not number then ffi.C.close(parent);ffi.C.close(target_parent);return nil,"atomic commit unavailable" end
-    local status=ffi.C.syscall(ffi.cast("long",number),ffi.cast("int",parent),ffi.cast("const char*",name),
-        ffi.cast("int",target_parent),ffi.cast("const char*",target_name),ffi.cast("unsigned int",1))
-    local synced=status==0 and ffi.C.fsync(target_parent)==0 and ffi.C.fsync(parent)==0
+    local ok,err=self:_renameAt2(ffi,parent,name,target_parent,target_name,1)
+    local degraded=false
+    if not ok and atomicUnsupported(err) then
+        -- Filesystems without renameat2 support (vfat/exfat userstore) reject
+        -- the no-replace flag. The staged file is already claimed by its
+        -- owner, so a bounded check-then-rename keeps a single-writer commit
+        -- instead of failing the download or settings backup outright.
+        if self:exists(target) then
+            ffi.C.close(parent);ffi.C.close(target_parent)
+            return nil,"destination exists or commit unavailable"
+        end
+        local moved,move_error=os.rename(source,target)
+        if not moved then ffi.C.close(parent);ffi.C.close(target_parent);return nil,move_error or "commit rename failed" end
+        degraded=true
+    end
+    if not ok and not degraded then
+        ffi.C.close(parent);ffi.C.close(target_parent)
+        return nil,"destination exists or commit unavailable"
+    end
+    local synced=ok and ffi.C.fsync(target_parent)==0 and ffi.C.fsync(parent)==0
     ffi.C.close(parent)
     ffi.C.close(target_parent)
-    if status~=0 then return nil,"destination exists or commit unavailable" end
+    if degraded then return true,"no-replace commit degraded on this filesystem" end
     if not synced then return true,"directory sync failed" end
     return true
 end

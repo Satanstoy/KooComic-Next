@@ -114,7 +114,10 @@ function Backend:_image(data,media,profile,validate_only)
 end
 
 function Backend:new(options)
-    local object=setmetatable({native=ffi.load(assert(options.native_library)),
+    local library=assert(options.native_library)
+    assert(require("libs/libkoreader-lfs").attributes(library,"mode")=="file",
+        "原生去彩纹组件缺失："..tostring(library))
+    local object=setmetatable({native=ffi.load(library),
         memory_budget=options.memory_budget or 256*1024*1024,
         page_path=assert(options.workspace).."/page.codec",
         files=options.files or Files:new{roots={options.workspace}}},self)

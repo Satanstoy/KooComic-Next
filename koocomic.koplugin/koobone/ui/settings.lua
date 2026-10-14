@@ -25,23 +25,22 @@ function SettingsUI.show(options)
     else
         reminder = "关闭"
     end
-    local title = table.concat({
-        "koo漫画设置",
-        "",
-        "竖屏书架：" .. tostring(ui.portrait_columns) .. " 列 × " .. tostring(ui.portrait_rows) .. " 行",
-        "横屏书架：" .. tostring(ui.landscape_columns) .. " 列 × " .. tostring(ui.landscape_rows) .. " 行",
-        "界面文字：" .. text_size_label,
-        "",
-        "当前版本：v" .. version,
-        "KOReader：" .. tostring(updater:koreaderVersion()),
-        "更新提醒：" .. reminder,
-    }, "\n")
+    local title = "koo漫画设置"
 
     local dialog
     local function applyUiChange()
-        settings:flush()
+        -- A failed local save (for example an unsupported commit on the device
+        -- userstore) must not silently drop the layout change: the in-memory
+        -- value still drives the shelf, and the user is told it was not saved.
+        local called,saved,save_error=pcall(settings.flush,settings)
         UIManager:close(dialog)
         if options.on_ui_changed then options.on_ui_changed() end
+        if not called or not saved then
+            UIManager:show(InfoMessage:new{
+                text = "界面设置已应用，但未能保存到本机，重启后可能恢复：\n" ..
+                    tostring(save_error or (saved == false and "未知原因") or saved),
+            })
+        end
         SettingsUI.show(options)
     end
     local function cycle(key, values)
@@ -81,8 +80,6 @@ function SettingsUI.show(options)
                     text = "界面文字：" .. text_size_label,
                     callback = function() cycle("text_size", { "normal", "large", "extra_large" }) end,
                 },
-            },
-            {
                 {
                     text="系列样式："..StackDisplay.labelFor(ui.series_style),
                     callback=function()
@@ -107,6 +104,16 @@ function SettingsUI.show(options)
                     UIManager:close(dialog)
                     require("koobone.ui.preprocess_profile").show(settings)
                 end},
+                {
+                    text = "版本与更新状态",
+                    callback = function()
+                        UIManager:show(InfoMessage:new{
+                            text = "当前版本：v" .. tostring(version) ..
+                                "\nKOReader：" .. tostring(updater:koreaderVersion()) ..
+                                "\n更新提醒：" .. tostring(reminder),
+                        })
+                    end,
+                },
             },
             {
                 {
@@ -116,8 +123,6 @@ function SettingsUI.show(options)
                         updater_ui:check(true)
                     end,
                 },
-            },
-            {
                 {text="回退插件版本",enabled=updater.canRollback and updater:canRollback() or false,
                     callback=function() UIManager:close(dialog);updater_ui:rollback() end},
             },
@@ -150,8 +155,6 @@ function SettingsUI.show(options)
                         end
                     end,
                 },
-            },
-            {
                 {
                     text = "下载目录",
                     callback = function()

@@ -12,7 +12,7 @@ package.preload["ui/font"]=function() return {} end
 package.preload["ui/geometry"]=function() return {} end
 local ui={series_style="divider",text_size="normal",portrait_columns=3,portrait_rows=2,landscape_columns=4,landscape_rows=2}
 local flushes,changes=0,0
-local options={settings={ui=function() return ui end,update=function() return {} end,flush=function() flushes=flushes+1 end},
+local options={settings={ui=function() return ui end,update=function() return {} end,flush=function() flushes=flushes+1;return true end},
     updater={koreaderVersion=function() return "test" end},updater_ui={},storage={},version="test",on_ui_changed=function() changes=changes+1 end}
 local dialog=require("koobone.ui.settings").show(options)
 local choice
@@ -37,4 +37,24 @@ local rollback_button
 for _,row in ipairs(dialog.buttons) do for _,button in ipairs(row) do if button.text=="回退插件版本" then rollback_button=button end end end
 assert(rollback_button and rollback_button.enabled,"verified backups need a native settings rollback entry")
 rollback_button.callback();assert(rollback_calls==1)
+-- A failed local settings save must still apply the layout change and notify
+-- the shelf, instead of aborting the callback and leaving stale rows/columns.
+local good_settings=options.settings
+options.settings={ui=function() return ui end,update=function() return {} end,
+    flush=function() error("injected settings save failure") end}
+local before_changes=changes
+dialog=require("koobone.ui.settings").show(options)
+local column_button
+for _,row in ipairs(dialog.buttons) do for _,button in ipairs(row) do
+    if button.text:find("竖屏列数",1,true) then column_button=button end
+end end
+assert(column_button,"settings must expose the portrait column control")
+column_button.callback()
+assert(changes==before_changes+1,"a failed save must still notify the shelf to relayout")
+local warned=false
+for _,widget in ipairs(shown) do
+    if widget.text and tostring(widget.text):find("未能保存",1,true) then warned=true end
+end
+assert(warned,"the user must be told when the layout change could not be persisted")
+options.settings=good_settings
 print("settings UI spec: OK")

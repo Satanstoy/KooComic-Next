@@ -1,4 +1,5 @@
 package.path="./koocomic.koplugin/?.lua;"..package.path
+package.preload["libs/libkoreader-lfs"]=function() return {attributes=function() return nil end} end
 local available,Service=pcall(require,"koobone.preprocess_service")
 assert(available,"downloaded-file preprocessing service is missing")
 assert(type(Service.nativeLibraryPath)=="function","default native library path must match the packaged plugin/native directory")
@@ -6,6 +7,10 @@ assert(Service.nativeLibraryPath():match("koocomic%.koplugin/native/moire%-kindl
     "default library must not resolve under koobone/native")
 local disabled=Service:new{storage={},directory="/not-created-by-test"}
 assert(disabled.available==false and type(disabled.reason)=="string")
+local missing_native=Service:new{storage={downloadDir=function() return "/tmp" end},
+    directory="/not-created-by-test",native_library="/nonexistent/native/moire-kindlehf.so"}
+assert(missing_native.available==false and missing_native.reason:find("未包含原生去彩纹组件",1,true),
+    "a package without the native filter must explain the missing component, not raise a loader errno: "..tostring(missing_native.reason))
 assert(disabled:submit({})==nil and disabled:isActive()==false)
 assert(disabled:jobs()[1]==nil and disabled:isLocked("/books/book.epub")==false)
 assert(type(disabled.profile)=="function","processing service must freeze validated profile controls at enqueue time")

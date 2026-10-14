@@ -44,17 +44,23 @@ function Service:new(options)
         available=false,running=false,retain_original=options.retain_original==true,
         coordinator=options.coordinator or Coordinator:new()},Service)
     local loaded,err=pcall(function()
-        local ffi=require("ffi")
-        local Files=require("koobone.preprocess_files")
-        local Worker=require("koobone.preprocess_worker")
-        local Sha=require("ffi/sha2")
         local directory=assert(options.directory)
         local native=options.native_library
         if not native then
+            local ffi=require("ffi")
             local Device=require("device")
             assert(Device.model=="KindleColorSoft" and ffi.arch=="arm","本构建只支持 Colorsoft ARM hard-float")
             native=Service.nativeLibraryPath()
         end
+        -- The native filter is only shipped in the Colorsoft experimental
+        -- package. Detect a missing library up front so the device shows an
+        -- actionable message instead of a raw dynamic-loader errno.
+        assert(require("libs/libkoreader-lfs").attributes(native,"mode")=="file",
+            "本安装包未包含原生去彩纹组件（缺少 "..tostring(native:match("([^/]+)$"))..
+            "）。请使用包含 native/ 目录的 Colorsoft 实验版安装包。")
+        local Files=require("koobone.preprocess_files")
+        local Worker=require("koobone.preprocess_worker")
+        local Sha=require("ffi/sha2")
         self.files=Files:new{roots={directory,self.storage:downloadDir()}}
         assert(self.files:mkdir(directory),"任务目录不可用")
         assert(self.files:stamp(directory),"安全处理需要文件系统支持 Linux statx 纳秒级元数据")
