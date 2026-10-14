@@ -17,6 +17,14 @@ local Sha=require("ffi/sha2")
 local directory=assert(arg[2]).."/run-"..tonumber(ffi.C.getpid())
 assert(require("libs/libkoreader-lfs").mkdir(directory))
 local files=Files:new{roots={directory}}
+do
+    local original_stamp=Files.stamp
+    Files.stamp=function() return nil end
+    local disabled=Service:new{storage={downloadDir=function() return directory end},directory=directory.."/unsupported-metadata",
+        native_library=root.."/native/preprocess/build/moire-host.so"}
+    Files.stamp=original_stamp
+    assert(not disabled.available,"unsupported high-resolution metadata must disable preprocessing before accepting tasks")
+end
 local data=ffi.new("unsigned char[?]",64*64*4)
 for y=0,63 do for x=0,63 do
     local offset=(y*64+x)*4
@@ -75,6 +83,17 @@ assert(scaled_ok and scaled_image.width==24 and scaled_image.height==24,
     "target profile must resample before filtering and encode the fitted dimensions")
 ffi.C.free(scaled_image.data)
 assert(files:hash(source)==fingerprint)
+do
+    local callbacks,done,hash={ },false,nil
+    local original=read(source)
+    files:hashAsync(source,function(_,callback) callbacks[#callbacks+1]=callback end,nil,
+        function(value) hash=value;done=true end)
+    table.remove(callbacks,1)()
+    assert(files:write(source,original:sub(1,-2)..string.char((original:byte(-1)+1)%256)))
+    while #callbacks>0 do table.remove(callbacks,1)() end
+    assert(done and hash==nil,"same-size source mutation during asynchronous hash must be rejected")
+    assert(files:write(source,original))
+end
 assert(files:writeJSON(directory.."/snapshot.json",{schema_version=1,stage="pending"}))
 assert(files:readJSON(directory.."/snapshot.json").stage=="pending")
 local scheduled,finished,worker_result={},false,nil
@@ -90,6 +109,50 @@ local unsafe=worker:start({id="symlink-rejection",source_path=source,source_fing
 assert(not unsafe,"unsafe temporary output must be rejected before opening the EPUB writer")
 assert(files:hash(source)==fingerprint)
 assert(os.remove(temporary))
+for _,kind in ipairs({"rewrite","replace","source-rewrite","source-replace","pre-status-replace"}) do
+    local original=read(source)
+    local original_hash_async=files.hashAsync
+    local original_hash=files.hash
+    local marker=directory.."/pre-status-replace-marker"
+    files.hash=function(self,path)
+        if kind=="pre-status-replace" and path==temporary and not self:exists(marker) then
+            local bytes=read(path);assert(self:remove(path));assert(self:write(path,bytes));assert(self:write(marker,"replaced"))
+        end
+        return original_hash(self,path)
+    end
+    local injected,done,success=false,false,nil
+    local output_reads=0
+    local expected=original
+    files.hashAsync=function(self,path,schedule,guard,callback,strict_stamp)
+        if path==temporary then output_reads=output_reads+1 end
+        if kind:match("^source") and path==temporary and output_reads==2 and not injected then
+            injected=true
+            if kind=="source-replace" then assert(os.remove(source)) end
+            expected=original:sub(1,-2)..string.char((original:byte(-1)+1)%256)
+            assert(self:write(source,expected))
+        elseif (kind=="rewrite" or kind=="replace") and path==source and not injected then
+            injected=true
+            if kind=="replace" then assert(os.remove(temporary)) end
+            assert(self:write(temporary,"changed output after validation"))
+        end
+        return original_hash_async(self,path,schedule,guard,callback,strict_stamp)
+    end
+    assert(worker:start({id="tamper-"..kind,source_path=source,source_fingerprint=fingerprint,
+        profile={strength=1,discard_original=true}},
+        {stage=function() end,progress=function() end,done=function(ok) success=ok;done=true end}))
+    for _=1,500 do
+        if done then break end
+        local callbacks=scheduled;scheduled={};for _,callback in ipairs(callbacks) do callback() end
+        ffi.C.usleep(10000)
+    end
+    files.hashAsync=original_hash_async
+    files.hash=original_hash
+    if kind=="pre-status-replace" then injected=files:exists(marker) end
+    assert(done and injected and not success,"changed output must never be committed: "..kind)
+    assert(read(source)==expected,"rejected output must preserve the current source: "..kind)
+    assert(files:write(source,original))
+    if files:exists(temporary) then assert(files:remove(temporary)) end
+end
 local handle=assert(worker:start({id="integration",source_path=source,source_fingerprint=fingerprint,profile={strength=1}},
     {stage=function() end,progress=function() end,done=function(ok,result) finished=ok;worker_result=result end}))
 local bounded=false

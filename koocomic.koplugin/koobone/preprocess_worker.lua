@@ -73,6 +73,7 @@ function Worker:start(job,events)
             return cancelled() or not reading or reading.occupied~=false
         end
         local owned_output=false
+        local output_identity
         local ok,result=pcall(function()
             local memory_file=assert(io.open("/proc/self/statm","rb"),"worker memory accounting unavailable")
             local pages=tonumber(memory_file:read("*a"):match("^(%d+)"));memory_file:close()
@@ -91,8 +92,11 @@ function Worker:start(job,events)
             local transaction_fs=self.files:transactionFS()
             transaction_fs.rename=function(source,target)
                 assert(source==paths.temporary and target==job.source_path,"unexpected commit paths")
+                if job.profile.restore then output_identity=self.files:identity(source) end
+                assert(output_identity and self.files:identity(source)==output_identity,"output ownership changed")
                 assert(self.files:sync(source),"output sync failed")
-                assert(self.files:writeJSON(paths.status,{state="committing",output_fingerprint=validated_fingerprint}),
+                assert(self.files:writeJSON(paths.status,{state="committing",output_fingerprint=validated_fingerprint,
+                    output_identity=output_identity}),
                     "cannot request commit")
                 while true do
                     local permission=self.files:readJSON(paths.permission)
@@ -114,7 +118,7 @@ function Worker:start(job,events)
                 assert(self.files:hash(job.source_path)==job.source_fingerprint,"source changed")
                 local processed,err=backend:process(job.source_path,paths.temporary,{profile=job.profile,
                     cancelled=cancelled,
-                    created=function() owned_output=true end,
+                    created=function() owned_output=true;output_identity=self.files:identity(paths.temporary) end,
                     progress=function(current,total)
                         assert(self.files:writeJSON(paths.status,{state="processing",current=current,total=total}))
                     end,
@@ -126,7 +130,7 @@ function Worker:start(job,events)
             end
             return {validated=true,committed=true,output_fingerprint=validated_fingerprint,backup_path=paths.backup}
         end)
-        if not ok and owned_output then self.files:remove(paths.temporary) end
+        if not ok and owned_output and self.files:identity(paths.temporary)==output_identity then self.files:remove(paths.temporary) end
         self.files:writeJSON(paths.status,{state=ok and "completed" or "failed",result=ok and result or nil,
             error=not ok and tostring(result) or nil})
     end,false,false)
@@ -149,27 +153,36 @@ function Worker:start(job,events)
     local function commit(state)
         committing=true
         local expected_source=job.profile.restore and job.profile.output_fingerprint or job.source_fingerprint
+        local output_identity=self.files:identity(paths.temporary)
+        local source_identity=self.files:identity(job.source_path)
         self.files:hashAsync(paths.temporary,self.schedule,guard,function(output_hash)
             if acknowledged then return end
             if output_hash~=state.output_fingerprint then self.files:writeJSON(paths.permission,{applied=false});return end
             self.files:hashAsync(job.source_path,self.schedule,guard,function(source_hash)
                 if acknowledged then return end
-                local applied=false
-                if source_hash==expected_source and guard() then
-                    local renamed,warning=self.files:rename(paths.temporary,job.source_path,true)
-                    applied=renamed==true
-                    if applied then committed_result={validated=true,committed=true,
-                        output_fingerprint=state.output_fingerprint,backup_path=paths.backup,
-                        warning_code=warning and "durability_unconfirmed" or nil} end
-                end
-                commit_applied=applied
-                local saved=self.files:writeJSON(paths.permission,{applied=applied})
-                if not saved then
-                    Util.terminateSubProcess(pid)
-                    if committed_result then committed_result.warning_code=committed_result.warning_code or "worker_result_missing" end
-                end
-            end)
-        end)
+                local source_stamp=self.files:stamp(job.source_path)
+                self.files:hashAsync(paths.temporary,self.schedule,guard,function(final_hash)
+                    if acknowledged then return end
+                    local applied=false
+                    if source_hash==expected_source and final_hash==state.output_fingerprint and guard() and
+                            source_identity and self.files:identity(job.source_path)==source_identity and
+                            source_stamp and self.files:stamp(job.source_path)==source_stamp and
+                            output_identity and output_identity==state.output_identity and self.files:identity(paths.temporary)==output_identity then
+                        local renamed,warning=self.files:rename(paths.temporary,job.source_path,true)
+                        applied=renamed==true
+                        if applied then committed_result={validated=true,committed=true,
+                            output_fingerprint=state.output_fingerprint,backup_path=paths.backup,
+                            warning_code=warning and "durability_unconfirmed" or nil} end
+                    end
+                    commit_applied=applied
+                    local saved=self.files:writeJSON(paths.permission,{applied=applied})
+                    if not saved then
+                        Util.terminateSubProcess(pid)
+                        if committed_result then committed_result.warning_code=committed_result.warning_code or "worker_result_missing" end
+                    end
+                end,true)
+            end,true)
+        end,true)
     end
     local function poll()
         if acknowledged then return end

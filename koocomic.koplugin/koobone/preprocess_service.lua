@@ -57,6 +57,7 @@ function Service:new(options)
         end
         self.files=Files:new{roots={directory,self.storage:downloadDir()}}
         assert(self.files:mkdir(directory),"任务目录不可用")
+        assert(self.files:stamp(directory),"安全处理需要文件系统支持 Linux statx 纳秒级元数据")
         self.schedule=options.schedule or function(delay,callback) require("ui/uimanager"):scheduleIn(delay,callback) end
         self.is_in_use=options.is_in_use or function(path)
             local reader=require("apps/reader/readerui").instance

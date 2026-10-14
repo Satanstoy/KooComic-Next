@@ -127,6 +127,31 @@ function Files:identity(path)
     return tostring(stat.dev)..":"..tostring(stat.ino)
 end
 
+function Files:stamp(path)
+    if not self:isSafe(path) then return nil end
+    local ordinary=lfs.attributes(path)
+    if not ordinary or (ordinary.mode~="file" and ordinary.mode~="directory") or
+            (ordinary.mode=="file" and (ordinary.nlink or 1)~=1) then return nil end
+    local ffi=require("ffi")
+    if ffi.os~="Linux" then return nil end
+    -- Linux statx has an architecture-independent layout, unlike struct stat.
+    if not pcall(ffi.typeof,"struct koocomic_statx") then ffi.cdef[[long syscall(long, ...);
+    struct koocomic_statx_time { int64_t seconds; uint32_t nanoseconds; int32_t reserved; };
+    struct koocomic_statx { uint32_t mask,blksize; uint64_t attributes; uint32_t nlink,uid,gid;
+        uint16_t mode,reserved; uint64_t ino,size,blocks,attributes_mask;
+        struct koocomic_statx_time atime,btime,ctime,mtime;
+        uint32_t rdev_major,rdev_minor,dev_major,dev_minor; uint64_t spare[14]; };]] end
+    local number=({x64=332,arm=397,arm64=291})[ffi.arch]
+    if not number then return nil end
+    local value=ffi.new("struct koocomic_statx[1]")
+    if ffi.C.syscall(ffi.cast("long",number),ffi.cast("int",-100),ffi.cast("const char*",path),
+            ffi.cast("int",256),ffi.cast("unsigned int",2047),value)~=0 or
+            require("bit").band(value[0].mask,960)~=960 then return nil end
+    local stat=value[0]
+    return table.concat({tostring(stat.dev_major),tostring(stat.dev_minor),tostring(stat.ino),tostring(stat.size),
+        tostring(stat.mtime.seconds),tostring(stat.mtime.nanoseconds),tostring(stat.ctime.seconds),tostring(stat.ctime.nanoseconds)},":")
+end
+
 
 local function renameDirectories(self,source,target,exchange)
     if not self:isSafe(source) or not self:isSafe(target) or lfs.symlinkattributes(source,"mode")~="directory" or
@@ -301,8 +326,10 @@ function Files:sync(path)
     return ok,sync_error
 end
 
-function Files:hashAsync(path,schedule,guard,callback)
+function Files:hashAsync(path,schedule,guard,callback,strict_stamp)
     if not self:isSafe(path) then callback(nil,"unsafe hash path");return end
+    local initial_stamp=self:stamp(path)
+    if strict_stamp and not initial_stamp then callback(nil,"high-resolution file metadata unavailable");return end
     local file,err=io.open(path,"rb")
     if not file then callback(nil,err);return end
     local update=Sha.sha256()
@@ -315,7 +342,7 @@ function Files:hashAsync(path,schedule,guard,callback)
         else
             file:close()
             local current=lfs.attributes(path)
-            if read_error or not current or not initial or bytes~=initial.size or current.ino~=initial.ino or current.size~=initial.size or
+            if read_error or (initial_stamp and self:stamp(path)~=initial_stamp) or not current or not initial or bytes~=initial.size or current.ino~=initial.ino or current.size~=initial.size or
                     current.modification~=initial.modification or current.change~=initial.change then
                 callback(nil,"file changed")
             else callback(update()) end
