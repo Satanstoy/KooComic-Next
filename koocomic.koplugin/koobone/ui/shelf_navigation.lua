@@ -16,6 +16,7 @@ function Navigation:setAccount(id)
     self.account_id, self.mode, self.page, self.query = id, "series", 1, ""
     self.books, self.memories, self.parent, self.series = {}, {}, nil, nil
     self.sort_mode, self.filter_mode = "recent", "all"
+    self.search_origin_page=nil
 end
 
 function Navigation:setBooks(books)
@@ -48,12 +49,25 @@ function Navigation:versions(item)
 end
 
 function Navigation:_state()
-    return {page=self.page, query=self.query, sort_mode=self.sort_mode, filter_mode=self.filter_mode}
+    return {page=self.page, query=self.query, sort_mode=self.sort_mode, filter_mode=self.filter_mode,
+        search_origin_page=self.search_origin_page}
 end
 
 function Navigation:_restore(state)
     state = state or {page=1, query="", sort_mode="recent", filter_mode="all"}
+    self.search_origin_page=state.search_origin_page
     for key, value in pairs(state) do self[key] = value end
+end
+
+function Navigation:setQuery(query)
+    if type(query)~="string" then return false end
+    if query==self.query then return true end
+    if self.query=="" and query~="" then self.search_origin_page=self.page end
+    self.query=query
+    if query=="" then
+        self.page=self.search_origin_page or self.page;self.search_origin_page=nil
+    else self.page=1 end
+    return true
 end
 
 function Navigation:switch(mode)
@@ -69,6 +83,7 @@ function Navigation:enter(series)
     if self.series or type(series) ~= "table" then return false end
     self.parent, self.series = self:_state(), series
     self.page, self.query = 1, ""
+    self.search_origin_page=nil
     return true
 end
 

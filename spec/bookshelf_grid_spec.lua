@@ -212,5 +212,15 @@ assert(not find(view,function(widget) return widget.description=="删除本地" 
     find(view,function(widget) return widget.description=="去彩纹处理" end),"processing selection must not expose download/delete tools")
 view:onBack()
 assert(view.closed == true)
+local returned=0
+view=require("koobone.ui.bookshelf_grid").show{books=books,page=2,path_label="Series",
+    storage=view.options.storage,
+    on_back=function() returned=returned+1;return true end}
+local page=view.page
+assert(view:onShelfSwipe(nil,{direction="east",pos={x=1,y=200}}) and returned==1 and view.page==page,
+    "left-edge right swipe must return without also turning a page")
+assert(view:onShelfSwipe(nil,{direction="east",pos={x=400,y=200}}) and view.page==page-1 and returned==1,
+    "content right swipe must page independently from edge return")
+view:_close()
 
 print("bookshelf grid spec: OK")

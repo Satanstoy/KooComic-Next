@@ -77,10 +77,21 @@ jobs:
           ./luajit "$GITHUB_WORKSPACE/spec/koreader_archive_crc_integration.lua" "$GITHUB_WORKSPACE"
           SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-http-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_download_transport_integration.lua" "$GITHUB_WORKSPACE"
           SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_download_queue_ui_integration.lua" "$GITHUB_WORKSPACE"
-          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_preprocess_manager_ui_integration.lua" "$GITHUB_WORKSPACE" 600 800
-          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_preprocess_manager_ui_integration.lua" "$GITHUB_WORKSPACE" 1024 758
-          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_book_versions_ui_integration.lua" "$GITHUB_WORKSPACE" 600 800
-          SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_book_versions_ui_integration.lua" "$GITHUB_WORKSPACE" 1024 758
+          for size in "600 800" "800 600" "758 1024" "1024 758"; do
+            SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_navigation_integration.lua" "$GITHUB_WORKSPACE" $size
+            SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_ui_matrix_integration.lua" "$GITHUB_WORKSPACE" $size
+            for font in normal large; do
+              for mode in "gray day" "gray night" "rgb day" "rgb night"; do
+                SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_preprocess_manager_ui_integration.lua" "$GITHUB_WORKSPACE" $size $font $mode
+                SDL_VIDEODRIVER=dummy KO_HOME=/tmp/koocomic-ui-runtime ./luajit "$GITHUB_WORKSPACE/spec/koreader_book_versions_ui_integration.lua" "$GITHUB_WORKSPACE" $size $font $mode
+              done
+            done
+          done
+          git clone --filter=blob:none --no-checkout https://github.com/AndyHazz/bookshelf.koplugin.git /tmp/bookshelf-reference
+          git -C /tmp/bookshelf-reference checkout --detach 2c8bfd8e53b73b24232e674e12ebc6168963aef5
+          for order in bookshelf-first koocomic-first; do
+            SDL_VIDEODRIVER=dummy KO_HOME="/tmp/koocomic-coexist-$order" ./luajit "$GITHUB_WORKSPACE/spec/koreader_bookshelf_coexistence_integration.lua" "$GITHUB_WORKSPACE" /tmp/bookshelf-reference "$order"
+          done
 
       - name: Build a test release package
         shell: bash

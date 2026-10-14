@@ -3,6 +3,11 @@ local function widget() return {new=function(_, fields) return fields end} end
 for _, name in ipairs({"buttondialog","infomessage","menu","multiinputdialog","confirmbox"}) do
     package.preload["ui/widget/"..name] = widget
 end
+package.preload["ui/widget/multiinputdialog"]=function() return {new=function(_,fields)
+    fields.onShowKeyboard=function() end
+    fields.getFields=function(self) return {self.fields[1].text} end
+    return fields
+end} end
 package.preload["socket"] = function() return {gettime=os.time} end
 local shown,callbacks=nil,{}
 package.preload["ui/uimanager"] = function() return {show=function(_,widget) shown=widget end,close=function() end,
@@ -113,4 +118,19 @@ assert(details.item==replacement,"version selection must resolve current catalog
 local before=details
 shelf:show({versions[1]});choose(versions[2]);assert(details==before)
 assert(shown.text:find("不再可用",1,true),"removed file versions must not open stale actions")
+local search_books={}
+for index=1,40 do search_books[index]={file_md5="search-"..index,vol_name=index==1 and "Unique needle" or "Original "..index,vol_series="Search Series",vol_author="Fixture"} end
+shelf:show(search_books);current.on_view("volumes");shelf.navigation.page=5;shelf:_render()
+shelf:showSearch();shown.fields[1].text="Unique needle";shown.buttons[1][3].callback()
+current.on_page_changed(current.books,1)
+assert(#current.books==1 and current.path_label:find("Unique needle",1,true) and current.path_label:find("1 项",1,true),
+    "production search must show query and projected result count")
+shelf:showSearch();shown.buttons[1][1].callback()
+assert(current.page==5 and #current.books==40,"clearing the actual search dialog must restore the pre-search page")
+current.on_view("series");shelf:showSearch();shown.fields[1].text="Unique needle";shown.buttons[1][3].callback()
+current.on_select(current.books[1])
+assert(shelf.navigation.parent and shelf.navigation.parent.query=="Unique needle","fixture must enter from an actual searched parent")
+shelf:show({{file_md5="foreign",vol_name="Other",vol_series="Other Series",vol_author="Fixture"}})
+assert(shelf.query=="Unique needle" and shelf.navigation.query=="Unique needle" and #current.books==0,
+    "automatic series removal must preserve parent query: controller="..shelf.query..", navigation="..shelf.navigation.query..", items="..#current.books)
 print("shelf controller spec: OK")

@@ -716,6 +716,12 @@ function GridShelf:refreshCovers()
 end
 
 function GridShelf:onShelfSwipe(_, gesture)
+    if self.closed then return false end
+    local origin=gesture and (gesture.start_pos or gesture.pos)
+    local edge=math.min(dp(32),math.floor(Screen:getWidth()/12))
+    if gesture and gesture.direction=="east" and type(origin)=="table" and type(origin.x)=="number" and origin.x>=0 and origin.x<edge then
+        return self:onBack()
+    end
     if gesture and gesture.direction == "west" then return self:_changePage(self.page + 1) end
     if gesture and gesture.direction == "east" then return self:_changePage(self.page - 1) end
     return false
@@ -757,7 +763,11 @@ function GridShelf:onShow()
 end
 
 function GridShelf:onCloseWidget()
+    if self.close_notified then return end
+    self.close_notified=true
     self.closed = true
+    if self[1] and self[1].free then self[1]:free() end
+    self[1]=nil
     if self.options.on_close then self.options.on_close() end
 end
 

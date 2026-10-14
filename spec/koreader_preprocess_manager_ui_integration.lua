@@ -1,9 +1,11 @@
 require("setupkoenv")
 local root=assert(arg[1]);package.path=root.."/koocomic.koplugin/?.lua;"..package.path
 local width,height=tonumber(arg[2]) or 600,tonumber(arg[3]) or 800
+local text_size,format,night=arg[4] or "large",arg[5] or "rgb",arg[6]=="night"
 G_defaults=require("luadefaults"):open()
 G_reader_settings=require("luasettings"):wrap{sdl_window={width=width,height=height},dev_no_c_blitter=false}
 local Device=require("device")
+Device.screen.night_mode=night
 require("document/canvascontext"):init(Device)
 local UI=require("ui/uimanager")
 local BB=require("ffi/blitbuffer")
@@ -19,12 +21,12 @@ for index=1,9 do
     local key="generated-"..index
     local path=directory.."/"..key..".epub"
     assert(files:write(path,"generated UI-only file fixture"))
-    records[key]={path=path,title="测试漫画 "..index,state="complete",updated_at=index}
+    records[key]={path=path,title="长标题测试漫画 VeryLongOriginalComicNameWithoutSpaces "..index,state="complete",updated_at=index}
     items[#items+1]={file_md5=key,vol_name=records[key].title,vol_series="测试系列",vol_author="Fixture"}
 end
 local settings={data={preprocess={strength=0.8,scale_mode="original"}},
     download=function() return {directory=directory,records=records} end,flush=function() return true end,
-    ui=function() return {portrait_columns=3,portrait_rows=2,landscape_columns=4,landscape_rows=2,series_style="divider",text_size="large"} end}
+    ui=function() return {portrait_columns=3,portrait_rows=2,landscape_columns=4,landscape_rows=2,series_style="divider",text_size=text_size} end}
 local storage=require("koobone.storage"):new(settings)
 local status_tasks={}
 local service={available=true,running=false,files=files,isActive=function() return false end,
@@ -56,11 +58,12 @@ end
 assert(find(view,function(widget) return widget.file==cover_path end),"actual cached bitmap must render, not a fallback placeholder")
 assert(find(view,function(widget) return widget.description=="去彩纹处理" end) and
     not find(view,function(widget) return widget.description=="删除本地" end))
-local canvas=BB.new(width,height,BB.TYPE_BBRGB32);canvas:fill(BB.COLOR_WHITE)
+local canvas=BB.new(width,height,format=="gray" and BB.TYPE_BB8 or BB.TYPE_BBRGB32);canvas:fill(BB.COLOR_WHITE)
 view:paintTo(canvas,0,0)
 local ink=0
 for y=60,height-60,10 do for x=10,width-10,10 do if canvas:getPixel(x,y):getColor8().a<240 then ink=ink+1 end end end
 assert(ink>100,"actual processing grid must be nonblank")
+if night then canvas:invert() end
 assert(canvas:writeToFile(directory.."/management.png","png"))
 view.options.on_selection_download()
 local confirm=UI._window_stack[#UI._window_stack].widget
@@ -73,5 +76,6 @@ local queue=require("koobone.ui.preprocess").show(storage,queue_service,{queue_o
 queue:onMenuSelect(queue.item_table[1])
 assert(not queue_service.running)
 UI:close(queue)
-print("KOReader processing management UI: OK "..width.."x"..height.." "..directory.."/management.png")
+print("KOReader processing management UI: OK "..width.."x"..height.." "..text_size.." "..format.." "..tostring(night).." "..directory.."/management.png")
+Device.screen.night_mode=false
 Device:exit()

@@ -160,6 +160,10 @@ function Bookshelf:_gridOptions(books)
     local nav = self.navigation
     nav.query, nav.sort_mode, nav.filter_mode = self.query, self.sort_mode, self.filter_mode
     books = nav:items(books)
+    local path_label=nav.series and nav.series.title or ""
+    if self.query~="" then
+        path_label=(path_label~="" and path_label.." / " or "").."搜索："..self.query.." · "..#books.." 项"
+    end
     local grid_options={
         books = books,
         storage = self.storage,
@@ -182,7 +186,7 @@ function Bookshelf:_gridOptions(books)
         on_selection_delete=function() self:confirmDelete(self.selection:resolve(self.library.items)) end,
         on_selection_download=function() self.downloader:enqueue(self.selection:resolve(self.library.items)) end,
         on_selection_more=function() self:showSelectionActions() end,
-        path_label = nav.series and nav.series.title or (self.query ~= "" and self.query or ""),
+        path_label = path_label,
         on_view = function(mode)
             nav:switch(mode)
             self.query, self.sort_mode, self.filter_mode = nav.query, nav.sort_mode, nav.filter_mode
@@ -299,7 +303,11 @@ function Bookshelf:show(books,preserve_anchor)
     self.library.items = books or self.library.items or {}
     self.selection:setAccount(account_id)
     self.selection:reconcile(self.library.items)
+    local prior_series=self.navigation.series
     self.navigation:setBooks(self.library.items)
+    if prior_series and not self.navigation.series then
+        self.query,self.sort_mode,self.filter_mode=self.navigation.query,self.navigation.sort_mode,self.navigation.filter_mode
+    end
     self:_prepareCachedCovers(self.library.items)
     local visible = self:_visibleBooks()
     if not grid_available then return self:_showListFallback(visible) end
@@ -407,6 +415,7 @@ function Bookshelf:showSearch()
                     text = "清除",
                     callback = function()
                         self.query = ""
+                        self.navigation:setQuery("")
                         UIManager:close(dialog)
                         self:_render()
                     end,
@@ -420,6 +429,7 @@ function Bookshelf:showSearch()
                     is_enter_default = true,
                     callback = function()
                         self.query = Util.trim(dialog:getFields()[1])
+                        self.navigation:setQuery(self.query)
                         UIManager:close(dialog)
                         self:_render()
                     end,
