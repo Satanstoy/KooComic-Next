@@ -5,11 +5,21 @@ assert(available,"downloaded-file preprocessing service is missing")
 assert(type(Service.nativeLibraryPath)=="function","default native library path must match the packaged plugin/native directory")
 assert(Service.nativeLibraryPath():match("koocomic%.koplugin/native/moire%-kindlehf%.so$"),
     "default library must not resolve under koobone/native")
+assert(Service.nativeLibraryPath({isKobo=function() return true end}):match("koocomic%.koplugin/native/moire%-kobo%.so$"),
+    "Kobo colour devices must resolve the kobo filter")
+assert(Service.colorCapable({hasColorScreen=function() return true end},{arch="arm"})==true,
+    "colour e-ink ARM devices must enable the filter")
+assert(Service.colorCapable({hasColorScreen=true},{arch="arm"})==true)
+assert(Service.colorCapable({hasColorScreen=function() return false end},{arch="arm"})==false,
+    "non-colour screens have no moire to remove")
+assert(Service.colorCapable({hasColorScreen=function() return true end},{arch="x64"})==false,
+    "only the arm targets have a prebuilt filter")
+assert(Service.colorCapable({},{arch="arm"})==false)
 local disabled=Service:new{storage={},directory="/not-created-by-test"}
 assert(disabled.available==false and type(disabled.reason)=="string")
 local missing_native=Service:new{storage={downloadDir=function() return "/tmp" end},
     directory="/not-created-by-test",native_library="/nonexistent/native/moire-kindlehf.so"}
-assert(missing_native.available==false and missing_native.reason:find("未包含原生去彩纹组件",1,true),
+assert(missing_native.available==false and missing_native.reason:find("原生去彩纹组件",1,true),
     "a package without the native filter must explain the missing component, not raise a loader errno: "..tostring(missing_native.reason))
 assert(disabled:submit({})==nil and disabled:isActive()==false)
 assert(disabled:jobs()[1]==nil and disabled:isLocked("/books/book.epub")==false)

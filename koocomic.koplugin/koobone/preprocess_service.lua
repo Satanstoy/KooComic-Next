@@ -8,8 +8,24 @@ local Service={}
 Service.__index=Service
 local instances={}
 local plugin_root=assert(debug.getinfo(1,"S").source:sub(2):match("^(.*)/koobone/[^/]+$"))
-function Service.nativeLibraryPath()
-    return plugin_root.."/native/moire-kindlehf.so"
+function Service.nativeLibraryPath(Device)
+    if not Device then
+        local ok,loaded=pcall(require,"device")
+        if ok then Device=loaded end
+    end
+    local kobo=Device and type(Device.isKobo)=="function" and Device:isKobo() or false
+    -- Kindle and Kobo share the armv7 hard-float ABI but not the libc
+    -- sysroot, so each colour platform ships its own prebuilt filter.
+    return plugin_root.."/native/"..(kobo and "moire-kobo.so" or "moire-kindlehf.so")
+end
+-- Availability gate: any colour e-ink ARM device (Kindle Colorsoft, Kobo
+-- Libra Colour / Clara Colour, ...). Non-colour screens have no moire to
+-- remove, so the feature stays unavailable there.
+function Service.colorCapable(Device,ffi)
+    if not Device or not ffi or ffi.arch~="arm" then return false end
+    local value=Device.hasColorScreen
+    local colour=(type(value)=="function" and Device:hasColorScreen()) or value==true
+    return colour==true
 end
 local function copy(value)
     if type(value)~="table" then return value end
@@ -49,15 +65,15 @@ function Service:new(options)
         if not native then
             local ffi=require("ffi")
             local Device=require("device")
-            assert(Device.model=="KindleColorSoft" and ffi.arch=="arm","本构建只支持 Colorsoft ARM hard-float")
-            native=Service.nativeLibraryPath()
+            assert(Service.colorCapable(Device,ffi),
+                "本构建只支持彩色墨水屏 ARM 设备（Colorsoft、Kobo Libra/Clara Colour 等）")
+            native=Service.nativeLibraryPath(Device)
         end
-        -- The native filter is only shipped in the Colorsoft experimental
-        -- package. Detect a missing library up front so the device shows an
-        -- actionable message instead of a raw dynamic-loader errno.
+        -- The native filter ships per platform; detect a missing library up
+        -- front so the device shows an actionable message instead of a raw
+        -- dynamic-loader errno.
         assert(require("libs/libkoreader-lfs").attributes(native,"mode")=="file",
-            "本安装包未包含原生去彩纹组件（缺少 "..tostring(native:match("([^/]+)$"))..
-            "）。请使用包含 native/ 目录的 Colorsoft 实验版安装包。")
+            "本安装包未包含该设备的原生去彩纹组件（缺少 "..tostring(native:match("([^/]+)$")).."）。")
         local Files=require("koobone.preprocess_files")
         local Worker=require("koobone.preprocess_worker")
         local Sha=require("ffi/sha2")

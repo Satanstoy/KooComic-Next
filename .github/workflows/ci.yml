@@ -108,8 +108,15 @@ jobs:
           sudo modprobe loop || true
           ./scripts/verify_atomic_filesystem.sh /tmp/koreader-runtime/lib/koreader "$GITHUB_WORKSPACE" vfat
 
-      - name: Verify unpublished Colorsoft experimental package
-        run: python3 spec/colorsoft_package_spec.py
+      - name: Verify colour package and the single release package with native filters
+        run: |
+          python3 spec/colorsoft_package_spec.py
+          python3 scripts/package_native.py --output /tmp/koocomic-native --channel stable
+          version="$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' koocomic.koplugin/_meta.lua)"
+          KOOC_NATIVE_DIR=/tmp/koocomic-native ./scripts/package_release.sh "${version}" "${GITHUB_REPOSITORY}" dist-native-ci
+          unzip -tq dist-native-ci/release/koocomic.koplugin-*.zip
+          unzip -l dist-native-ci/release/koocomic.koplugin-*.zip | grep -q "native/moire-kindlehf.so"
+          unzip -l dist-native-ci/release/koocomic.koplugin-*.zip | grep -q "native/moire-kobo.so"
 
       - name: Build a test release package
         shell: bash
