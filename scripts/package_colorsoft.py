@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+from package_source import plugin_files
 
 ROOT = Path(__file__).resolve().parents[1]
 SDK_URL = "https://github.com/koreader/koxtoolchain/releases/download/2026.08/kindlehf.tar.zst"
@@ -61,22 +62,12 @@ def build(archive, destination, workspace):
                 "dynamic_device_load_verified": False,
                 "algorithm_source": "Euphoriyy/derainbowify.koplugin@f2892a219da65bd765d34ae2140a5dd706dfc42b"}
     inputs = [*sources, ROOT / "native/preprocess/vendor/moire_filter_kissfft.c",
-              ROOT / "spec/native_preprocess_smoke.c", Path(__file__).resolve()]
+              ROOT / "spec/native_preprocess_smoke.c", Path(__file__).resolve(), ROOT / "scripts/package_source.py"]
     inputs += sorted((ROOT / "native/preprocess/vendor/kissfft").glob("*.h"))
     metadata["build_input_sha256"] = {str(path.relative_to(ROOT)): sha256(path) for path in inputs}
     members = {}
     plugin = ROOT / "koocomic.koplugin"
-    tracked = subprocess.check_output(["git", "ls-files", "-z", "--", "koocomic.koplugin"], cwd=ROOT)
-    for name in sorted(tracked.decode().split("\0")):
-        if not name:
-            continue
-        path = ROOT / name
-        if path.is_symlink():
-            raise SystemExit("Plugin symlinks are not permitted")
-        if not path.is_file():
-            continue
-        if path.suffix in {".log", ".part", ".tmp", ".epub", ".so"} or path.name in {"koobone.lua", "koocomic.lua", ".DS_Store"}:
-            raise SystemExit("Runtime/generated file inside plugin source: " + str(path.relative_to(ROOT)))
+    for path in plugin_files(ROOT):
         members["koocomic.koplugin/" + str(path.relative_to(plugin))] = path.read_bytes()
     base = "koocomic.koplugin/native/"
     members[base + "moire-kindlehf.so"] = native.read_bytes()

@@ -46,7 +46,7 @@ if [[ ! -f "$RELEASE_NOTES_FILE" ]]; then
 fi
 
 mkdir -p "$RELEASE_DIR" "$PAGES_DIR" "$TEMP_DIR/koocomic.koplugin"
-cp -R "$PLUGIN_DIR/." "$TEMP_DIR/koocomic.koplugin/"
+python3 "$SCRIPT_DIR/package_source.py" "$PROJECT_DIR" "$TEMP_DIR/koocomic.koplugin"
 find "$TEMP_DIR/koocomic.koplugin" -name '.DS_Store' -delete
 find "$TEMP_DIR/koocomic.koplugin" -type f \( -name '*.log' -o -name '*.part' -o -name '*.tmp' \) -delete
 rm -f "$RELEASE_DIR/$ARCHIVE_NAME" "$RELEASE_DIR/$ARCHIVE_NAME.sha256"

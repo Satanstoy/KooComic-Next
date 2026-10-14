@@ -51,6 +51,7 @@ jobs:
 
       - name: Build and test host preprocessing prototype
         run: |
+          python3 spec/release_package_spec.py
           make -C native/preprocess
           make -C native/preprocess smoke
           python3 spec/native_preprocess_spec.py
